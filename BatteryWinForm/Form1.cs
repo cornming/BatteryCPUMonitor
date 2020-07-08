@@ -37,18 +37,24 @@ namespace BatteryWinForm
                 float ram = computerInfoService.GetRamUsage();
 
                 this.batteryLabel.Text = computerInfoService.ShowPercent() +
-               "CPU:" + cpu.ToString() + " / " +
+               "CPU:" + cpu.ToString() + "% / " +
                "RAM:" + ram.ToString() + "";
                 //DateTime.Now.ToString("HH:mm:ss");
                 int cpuRange = 255 * Convert.ToInt32(Math.Round(cpu)) / 100;
                 this.batteryLabel.ForeColor = Color.FromArgb(cpuRange, 255 - cpuRange, 0);
             };
             batteryTimer.Start();
-            this.batteryLabel.Click += (s, e) =>
-            {
-                var batteryService = new Services.ComputerInfoService();
-                batteryService.ShowInfo();
-            };
+            //this.batteryLabel.Click += (s, e) =>
+            //{
+            //    var batteryService = new Services.ComputerInfoService();
+            //    batteryService.ShowInfo();
+            //};
+        }
+
+
+        private void closeMenuItemClick(object sender, EventArgs e)
+        {
+            this.Close();
         }
     }
 }
