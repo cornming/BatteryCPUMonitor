@@ -41,7 +41,7 @@
             this.batteryLabel.Dock = System.Windows.Forms.DockStyle.Left;
             this.batteryLabel.Location = new System.Drawing.Point(0, 0);
             this.batteryLabel.Name = "batteryLabel";
-            this.batteryLabel.Size = new System.Drawing.Size(81, 30);
+            this.batteryLabel.Size = new System.Drawing.Size(81, 20);
             this.batteryLabel.TabIndex = 0;
             this.batteryLabel.Text = "label1";
             // 
@@ -63,20 +63,21 @@
             // Form1
             // 
             this.AllowDrop = true;
-            this.AutoScaleDimensions = new System.Drawing.SizeF(14F, 30F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(14F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AutoSize = true;
             this.BackColor = System.Drawing.Color.Black;
-            this.ClientSize = new System.Drawing.Size(200, 21);
+            this.ClientSize = new System.Drawing.Size(200, 31);
             this.ContextMenuStrip = this.contextMenuStrip1;
             this.Controls.Add(this.batteryLabel);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
-            this.Name = "Form1";
-            this.Opacity = 0.8D;
-            this.SizeGripStyle = System.Windows.Forms.SizeGripStyle.Show;
+            this.Name = "ComInfo";
+            this.Opacity = 0.6D;
+            this.SizeGripStyle = System.Windows.Forms.SizeGripStyle.Auto;
             this.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
             this.Text = "ComInfo";
             this.TopMost = true;
+            this.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.Load += new System.EventHandler(this.Form1_Load);
             this.contextMenuStrip1.ResumeLayout(false);
             this.contextMenuStrip1.PerformLayout();
