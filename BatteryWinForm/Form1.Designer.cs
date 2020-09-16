@@ -78,6 +78,7 @@
             this.Text = "ComInfo";
             this.TopMost = true;
             this.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this.ShowInTaskbar = false;
             this.Load += new System.EventHandler(this.Form1_Load);
             this.contextMenuStrip1.ResumeLayout(false);
             this.contextMenuStrip1.PerformLayout();
