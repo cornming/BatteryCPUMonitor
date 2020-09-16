@@ -36,7 +36,7 @@ namespace BatteryWinForm
 
             Form1 a = this;
             a.StartPosition = FormStartPosition.Manual;
-            a.Location = new Point(((Screen.PrimaryScreen.WorkingArea.Width + (a.Width / 2)) / 2), Screen.PrimaryScreen.WorkingArea.Height - a.Height + 20);
+            a.Location = new Point(((Screen.PrimaryScreen.WorkingArea.Width - (a.Width / 2)) / 2), Screen.PrimaryScreen.WorkingArea.Height - a.Height + 20);
             a.TopMost = true;
             a.Height = 20;
 
@@ -62,7 +62,7 @@ namespace BatteryWinForm
 
                 if (IsFirst)
                 {
-                    this.Location = new Point(((Screen.PrimaryScreen.WorkingArea.Width + (a.Width/2)) / 2), Screen.PrimaryScreen.WorkingArea.Height - a.Height);
+                    this.Location = new Point(((Screen.PrimaryScreen.WorkingArea.Width - (a.Width/2)) / 2), Screen.PrimaryScreen.WorkingArea.Height - a.Height);
                     IsFirst = false;
                 }
             };
