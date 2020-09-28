@@ -44,7 +44,7 @@ namespace BatteryWinForm
                 this.Height = this.batteryLabel.Height;
                 this.Width = this.batteryLabel.Width;
 
-                this.Location = new Point(((Screen.PrimaryScreen.WorkingArea.Width - (this.Width / 2)) / 2), Screen.PrimaryScreen.WorkingArea.Height - this.Height);
+                this.Location = GetLocation();
             };
             this.batteryLabel.MouseLeave += (s1, e1) =>
             {
@@ -55,13 +55,13 @@ namespace BatteryWinForm
                 this.Height = this.batteryLabel.Height;
                 this.Width = this.batteryLabel.Width;
 
-                this.Location = new Point(((Screen.PrimaryScreen.WorkingArea.Width - (this.Width / 2)) / 2), Screen.PrimaryScreen.WorkingArea.Height - this.Height);
+                this.Location = GetLocation();
             };
 
             Form1 a = this;
             a.StartPosition = FormStartPosition.Manual;
             a.TopMost = true;
-            a.Location = new Point(((Screen.PrimaryScreen.WorkingArea.Width - (a.Width / 2)) / 2), Screen.PrimaryScreen.WorkingArea.Height - a.Height + 20);
+            a.Location = GetLocation(20);
             a.Height = 20;
 
 
@@ -97,9 +97,14 @@ namespace BatteryWinForm
 
             if (IsFirst)
             {
-                this.Location = new Point(((Screen.PrimaryScreen.WorkingArea.Width - (this.Width / 2)) / 2), Screen.PrimaryScreen.WorkingArea.Height - this.Height);
+                this.Location = GetLocation();
                 IsFirst = false;
             }
+        }
+
+        private Point GetLocation(int range = 0)
+        {
+            return new Point(((Screen.PrimaryScreen.WorkingArea.Width - (this.Width)) / 2), Screen.PrimaryScreen.WorkingArea.Height - this.Height  + range);
         }
 
         private void Form1_MouseDown(object sender,
