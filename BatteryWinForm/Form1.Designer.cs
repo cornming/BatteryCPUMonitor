@@ -40,8 +40,9 @@
             this.batteryLabel.AutoSize = true;
             this.batteryLabel.Dock = System.Windows.Forms.DockStyle.Left;
             this.batteryLabel.Location = new System.Drawing.Point(0, 0);
+            this.batteryLabel.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.batteryLabel.Name = "batteryLabel";
-            this.batteryLabel.Size = new System.Drawing.Size(81, 20);
+            this.batteryLabel.Size = new System.Drawing.Size(42, 15);
             this.batteryLabel.TabIndex = 0;
             this.batteryLabel.Text = "label1";
             // 
@@ -51,34 +52,33 @@
             this.contextMenuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.toolStripTextBox1});
             this.contextMenuStrip1.Name = "contextMenuStrip1";
-            this.contextMenuStrip1.Size = new System.Drawing.Size(161, 46);
+            this.contextMenuStrip1.Size = new System.Drawing.Size(161, 29);
             // 
             // toolStripTextBox1
             // 
             this.toolStripTextBox1.Name = "toolStripTextBox1";
-            this.toolStripTextBox1.Size = new System.Drawing.Size(100, 38);
+            this.toolStripTextBox1.Size = new System.Drawing.Size(100, 23);
             this.toolStripTextBox1.Text = "關閉";
             this.toolStripTextBox1.Click += new System.EventHandler(this.closeMenuItemClick);
             // 
             // Form1
             // 
             this.AllowDrop = true;
-            this.AutoScaleDimensions = new System.Drawing.SizeF(14F, 20F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AutoSize = true;
             this.BackColor = System.Drawing.Color.Black;
-            this.ClientSize = new System.Drawing.Size(200, 31);
+            this.ClientSize = new System.Drawing.Size(100, 23);
             this.ContextMenuStrip = this.contextMenuStrip1;
             this.Controls.Add(this.batteryLabel);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
-            this.Name = "ComInfo";
+            this.Margin = new System.Windows.Forms.Padding(2);
+            this.Name = "Form1";
             this.Opacity = 0.6D;
-            this.SizeGripStyle = System.Windows.Forms.SizeGripStyle.Auto;
+            this.ShowInTaskbar = false;
             this.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
             this.Text = "ComInfo";
             this.TopMost = true;
-            this.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.ShowInTaskbar = false;
             this.Load += new System.EventHandler(this.Form1_Load);
             this.contextMenuStrip1.ResumeLayout(false);
             this.contextMenuStrip1.PerformLayout();
