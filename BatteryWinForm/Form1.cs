@@ -67,7 +67,7 @@ namespace BatteryWinForm
 
             //電池電量
             Timer batteryTimer = new Timer();
-            batteryTimer.Interval = 1000 * 10;
+            batteryTimer.Interval = 1000;
             batteryTimer.Tick += BatteryTimer_Tick;
             batteryTimer.Start();
             BatteryTimer_Tick(null, null);
@@ -82,16 +82,17 @@ namespace BatteryWinForm
         {
             //更新電量狀態
             var computerInfoService = new Services.ComputerInfoService();
-            float cpu = computerInfoService.GetCpuUsage();
-            float ram = computerInfoService.GetRamUsage();
+            string cpu = computerInfoService.GetCpuUsage();
+            string ram = computerInfoService.GetRamUsage();
 
 
             //DateTime.Now.ToString("HH:mm:ss");
-            int cpuRange = 255 * Convert.ToInt32(Math.Round(cpu)) / 100;
+            //int cpuRange = 255 * Convert.ToInt32(Math.Round(cpu)) / 100;
+            int cpuRange = 255 * Convert.ToInt32(cpu) / 100;
 
             this.batteryLabel.Text = computerInfoService.ShowPercent().Trim() +
-           "CPU:" + cpu.ToString().Trim() + "% / " +
-           "RAM:" + ram.ToString().Trim() + "";
+           " CPU:" + cpu.ToString().Trim() + "% / " +
+           "RAM:" + ram.ToString().Trim() + "%";
 
             this.batteryLabel.ForeColor = Color.FromArgb(cpuRange, 255 - cpuRange, 0);
 

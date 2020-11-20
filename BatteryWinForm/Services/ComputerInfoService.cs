@@ -77,7 +77,7 @@ namespace BatteryWinForm.Services
         /// </summary>
         /// <param name="cpuUsage"></param>
         /// <returns></returns>
-        public float GetCpuUsage()
+        public string GetCpuUsage()
         {
             float _usage = 0;
 
@@ -87,16 +87,17 @@ namespace BatteryWinForm.Services
                 _usage += cpuUsage.NextValue();
             }
 
-            return _usage / 9; //第一次抓到的值為零,所以捨去不計.
+            return string.Format("{0:n0}",_usage / 9); //第一次抓到的值為零,所以捨去不計.
         }
         /// <summary>
         /// 取得記憶體使用量
         /// </summary>
         /// <param name="ramUsage"></param>
         /// <returns></returns>
-        public float GetRamUsage()
+        public string GetRamUsage()
         {
-            return ramUsage.NextValue();
+            int ramRound = int.Parse(Math.Round(ramUsage.NextValue()/100, 0).ToString());
+            return string.Format("{0:n0}", ramRound);
         }
         #endregion
     }
