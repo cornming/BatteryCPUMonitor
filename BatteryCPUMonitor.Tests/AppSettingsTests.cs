@@ -61,6 +61,32 @@ public class AppSettingsTests : IDisposable
     }
 
     [Fact]
+    public void 顯示項目預設全部開啟()
+    {
+        Assert.Equal(VisibleItems.All, AppSettings.Load(SettingsPath).Visible);
+    }
+
+    [Fact]
+    public void 舊版設定檔沒有顯示項目欄位_讀取後維持全部開啟()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+        File.WriteAllText(SettingsPath, "{ \"anchorX\": 100, \"anchorY\": 200, \"clickThrough\": true }");
+
+        AppSettings settings = AppSettings.Load(SettingsPath);
+
+        Assert.Equal(new Point(100, 200), settings.Anchor);
+        Assert.Equal(VisibleItems.All, settings.Visible);
+    }
+
+    [Fact]
+    public void 關掉的顯示項目_存檔後再讀取仍是關的()
+    {
+        new AppSettings { ShowDisk = false, ShowBattery = false }.Save(SettingsPath);
+
+        Assert.Equal(new VisibleItems(Battery: false, CpuRam: true, Disk: false, Network: true), AppSettings.Load(SettingsPath).Visible);
+    }
+
+    [Fact]
     public void 只有一個座標_不視為有效位置()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);

@@ -30,11 +30,33 @@ public class ThresholdsTests
         Assert.Equal(expected, Thresholds.ForRam(percent));
     }
 
+    [Theory]
+    [InlineData(0.0, Level.Good)]
+    [InlineData(10485759.0, Level.Good)]      // 差 1 位元組到 10 MB/s
+    [InlineData(10485760.0, Level.Warn)]      // 10 MB/s
+    [InlineData(104857600.0, Level.Critical)] // 100 MB/s
+    public void 磁碟門檻_每秒十MB轉黃_一百MB轉紅(double bytesPerSecond, Level expected)
+    {
+        Assert.Equal(expected, Thresholds.ForDiskRate(bytesPerSecond));
+    }
+
+    [Theory]
+    [InlineData(0.0, Level.Good)]
+    [InlineData(1048575.0, Level.Good)]       // 差 1 位元組到 1 MB/s
+    [InlineData(1048576.0, Level.Warn)]       // 1 MB/s
+    [InlineData(10485760.0, Level.Critical)]  // 10 MB/s
+    public void 網路門檻_每秒一MB轉黃_十MB轉紅(double bytesPerSecond, Level expected)
+    {
+        Assert.Equal(expected, Thresholds.ForNetworkRate(bytesPerSecond));
+    }
+
     [Fact]
     public void 沒有數值時不帶警示等級()
     {
         Assert.Equal(Level.Neutral, Thresholds.ForCpu(null));
         Assert.Equal(Level.Neutral, Thresholds.ForRam(null));
+        Assert.Equal(Level.Neutral, Thresholds.ForDiskRate(null));
+        Assert.Equal(Level.Neutral, Thresholds.ForNetworkRate(null));
     }
 
     [Theory]
