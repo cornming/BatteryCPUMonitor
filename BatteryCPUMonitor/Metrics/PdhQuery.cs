@@ -13,6 +13,13 @@ internal sealed class PdhQuery : IDisposable
     private const uint PdhFmtNoCap100 = 0x00008000;
     private const uint PdhCStatusValidData = 0;
     private const uint PdhCStatusNewData = 1;
+    private const int PdhMoreData = unchecked((int)0x800007D2);
+
+    // PDH_FMT_COUNTERVALUE_ITEM_W 的配置（32 與 64 位元相同）：
+    // 位移 0 為名稱指標，位移 8 為狀態碼，位移 16 為 double 數值，每筆 24 位元組。
+    private const int ItemSize = 24;
+    private const int ItemStatusOffset = 8;
+    private const int ItemValueOffset = 16;
 
     private IntPtr _query;
 
@@ -73,6 +80,70 @@ internal sealed class PdhQuery : IDisposable
         return double.IsFinite(value.DoubleValue) ? value.DoubleValue : null;
     }
 
+    /// <summary>
+    /// 讀取含萬用字元（例如 <c>\GPU Engine(*)\...</c>）的計數器，回傳每個執行個體的名稱與數值。
+    /// 還沒有有效資料的執行個體會被略過；整個計數器讀不到時回傳 null。
+    /// </summary>
+    public IReadOnlyList<(string Instance, double Value)>? ReadArray(IntPtr? counter)
+    {
+        if (_query == IntPtr.Zero || counter is not IntPtr handle)
+        {
+            return null;
+        }
+
+        // 執行個體的數量隨時會變（例如程式開開關關），所需的緩衝區大小也跟著變，最多重試幾次。
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            uint size = 0;
+            int status = PdhGetFormattedCounterArrayW(handle, PdhFmtDouble, ref size, out _, IntPtr.Zero);
+            if (status != PdhMoreData || size == 0)
+            {
+                return status == ErrorSuccess ? [] : null;
+            }
+
+            IntPtr buffer = Marshal.AllocHGlobal((int)size);
+            try
+            {
+                status = PdhGetFormattedCounterArrayW(handle, PdhFmtDouble, ref size, out uint count, buffer);
+                if (status == PdhMoreData)
+                {
+                    continue;
+                }
+
+                if (status != ErrorSuccess)
+                {
+                    return null;
+                }
+
+                var items = new List<(string Instance, double Value)>((int)count);
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr item = buffer + i * ItemSize;
+                    uint itemStatus = (uint)Marshal.ReadInt32(item, ItemStatusOffset);
+                    if (itemStatus != PdhCStatusValidData && itemStatus != PdhCStatusNewData)
+                    {
+                        continue;
+                    }
+
+                    double value = BitConverter.Int64BitsToDouble(Marshal.ReadInt64(item, ItemValueOffset));
+                    string? name = Marshal.PtrToStringUni(Marshal.ReadIntPtr(item));
+                    if (name is not null && double.IsFinite(value))
+                    {
+                        items.Add((name, value));
+                    }
+                }
+
+                return items;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        return null;
+    }
+
     public void Dispose()
     {
         if (_query != IntPtr.Zero)
@@ -101,6 +172,9 @@ internal sealed class PdhQuery : IDisposable
 
     [DllImport("pdh.dll", ExactSpelling = true)]
     private static extern int PdhGetFormattedCounterValue(IntPtr counter, uint format, IntPtr type, out PDH_FMT_COUNTERVALUE value);
+
+    [DllImport("pdh.dll", ExactSpelling = true)]
+    private static extern int PdhGetFormattedCounterArrayW(IntPtr counter, uint format, ref uint bufferSize, out uint itemCount, IntPtr itemBuffer);
 
     [DllImport("pdh.dll", ExactSpelling = true)]
     private static extern int PdhCloseQuery(IntPtr query);

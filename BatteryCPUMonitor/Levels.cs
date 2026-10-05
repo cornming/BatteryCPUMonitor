@@ -30,6 +30,13 @@ internal static class Thresholds
     public const int BatteryWarn = 40;
     public const int BatteryCritical = 20;
 
+    public const double GpuWarn = 60;
+    public const double GpuCritical = 85;
+
+    // 電池健康度越低越差：低於 80% 開始留意，低於 60% 建議考慮更換。
+    public const double BatteryHealthWarn = 80;
+    public const double BatteryHealthCritical = 60;
+
     // 磁碟與網路的顏色不是「警報」，而是讓人一眼看出有東西正在大量讀寫或傳輸。
     public const double DiskWarnBytesPerSecond = 10 * 1024 * 1024;
     public const double DiskCriticalBytesPerSecond = 100 * 1024 * 1024;
@@ -40,6 +47,14 @@ internal static class Thresholds
     public static Level ForCpu(double? percent) => Rising(percent, CpuWarn, CpuCritical);
 
     public static Level ForRam(double? percent) => Rising(percent, RamWarn, RamCritical);
+
+    public static Level ForGpu(double? percent) => Rising(percent, GpuWarn, GpuCritical);
+
+    public static Level ForBatteryHealth(double? percent) =>
+        percent is not double value ? Level.Neutral
+        : value < BatteryHealthCritical ? Level.Critical
+        : value < BatteryHealthWarn ? Level.Warn
+        : Level.Good;
 
     public static Level ForDiskRate(double? bytesPerSecond) =>
         Rising(bytesPerSecond, DiskWarnBytesPerSecond, DiskCriticalBytesPerSecond);

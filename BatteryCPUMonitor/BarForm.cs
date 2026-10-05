@@ -4,7 +4,7 @@ using BatteryCPUMonitor.Metrics;
 namespace BatteryCPUMonitor;
 
 /// <summary>
-/// 置頂、無邊框的資訊橫條：以兩列格狀版面顯示電池、CPU、記憶體、磁碟與網路，數值各自依門檻變色。
+/// 置頂、無邊框的資訊橫條：以兩列格狀版面顯示電池、CPU、記憶體、GPU、磁碟與網路，數值各自依門檻變色。
 /// 左鍵拖曳可移動（位置會記住），滑鼠移入時變得不透明，右鍵或系統匣圖示開啟選單。
 /// </summary>
 internal sealed class BarForm : Form
@@ -41,7 +41,9 @@ internal sealed class BarForm : Form
     private readonly ToolStripMenuItem _autoStartItem = new("開機自動啟動");
     private readonly ToolStripMenuItem _clickThroughItem = new("滑鼠穿透");
     private readonly ToolStripMenuItem _showBatteryItem = new("電池");
+    private readonly ToolStripMenuItem _showBatteryDetailItem = new("電池詳情（功耗、健康度）");
     private readonly ToolStripMenuItem _showCpuRamItem = new("CPU 與記憶體");
+    private readonly ToolStripMenuItem _showGpuItem = new("GPU 與顯示記憶體");
     private readonly ToolStripMenuItem _showDiskItem = new("磁碟讀寫");
     private readonly ToolStripMenuItem _showNetworkItem = new("網路速度");
     private readonly NotifyIcon _tray = new();
@@ -149,12 +151,16 @@ internal sealed class BarForm : Form
         var close = new ToolStripMenuItem("關閉");
 
         showItems.DropDownItems.Add(_showBatteryItem);
+        showItems.DropDownItems.Add(_showBatteryDetailItem);
         showItems.DropDownItems.Add(_showCpuRamItem);
+        showItems.DropDownItems.Add(_showGpuItem);
         showItems.DropDownItems.Add(_showDiskItem);
         showItems.DropDownItems.Add(_showNetworkItem);
 
         _showBatteryItem.Click += (_, _) => ToggleItem(s => s.ShowBattery = !s.ShowBattery);
+        _showBatteryDetailItem.Click += (_, _) => ToggleItem(s => s.ShowBatteryDetail = !s.ShowBatteryDetail);
         _showCpuRamItem.Click += (_, _) => ToggleItem(s => s.ShowCpuRam = !s.ShowCpuRam);
+        _showGpuItem.Click += (_, _) => ToggleItem(s => s.ShowGpu = !s.ShowGpu);
         _showDiskItem.Click += (_, _) => ToggleItem(s => s.ShowDisk = !s.ShowDisk);
         _showNetworkItem.Click += (_, _) => ToggleItem(s => s.ShowNetwork = !s.ShowNetwork);
 
@@ -168,7 +174,11 @@ internal sealed class BarForm : Form
         {
             _showBatteryItem.Checked = _settings.ShowBattery;
             _showBatteryItem.Enabled = _snapshot.Battery.HasBattery;
+            _showBatteryDetailItem.Checked = _settings.ShowBatteryDetail;
+            _showBatteryDetailItem.Enabled = _snapshot.Battery.HasBattery;
             _showCpuRamItem.Checked = _settings.ShowCpuRam;
+            _showGpuItem.Checked = _settings.ShowGpu;
+            _showGpuItem.Enabled = _collector.HasGpuCounters;
             _showDiskItem.Checked = _settings.ShowDisk;
             _showNetworkItem.Checked = _settings.ShowNetwork;
             _autoStartItem.Checked = AutoStart.IsEnabled();
@@ -238,7 +248,8 @@ internal sealed class BarForm : Form
         _sampling = true;
         try
         {
-            MetricsSnapshot snapshot = await Task.Run(_collector.Sample);
+            VisibleItems visible = _settings.Visible;
+            MetricsSnapshot snapshot = await Task.Run(() => _collector.Sample(visible));
             if (IsDisposed || Disposing)
             {
                 return;

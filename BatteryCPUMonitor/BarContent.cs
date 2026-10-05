@@ -13,9 +13,9 @@ internal readonly record struct BarCell(string Label, string Value, Level Level)
 internal readonly record struct BarColumn(BarCell Top, BarCell Bottom, string ValueTemplate);
 
 /// <summary>使用者選擇要顯示哪些項目。</summary>
-internal readonly record struct VisibleItems(bool Battery, bool CpuRam, bool Disk, bool Network)
+internal readonly record struct VisibleItems(bool Battery, bool BatteryDetail, bool CpuRam, bool Gpu, bool Disk, bool Network)
 {
-    public static VisibleItems All => new(true, true, true, true);
+    public static VisibleItems All => new(true, true, true, true, true, true);
 }
 
 /// <summary>決定橫條上要顯示的內容。純計算，不碰畫面。</summary>
@@ -23,10 +23,11 @@ internal static class BarContent
 {
     private const string PercentTemplate = "100%";
     private const string RateTemplate = "1023KB";
+    private const string WattsTemplate = "-99.9W";
 
     /// <summary>
-    /// 依序產生各欄：電池、CPU／RAM、磁碟讀寫、網路上下傳。
-    /// 沒有電池的電腦不會有電池欄；全部被關掉時至少保留 CPU／RAM。
+    /// 依序產生各欄：電池、電池詳情、CPU／RAM、GPU、磁碟讀寫、網路上下傳。
+    /// 這台電腦沒有的硬體（電池、GPU 計數器）不會有對應的欄；一欄都不剩時至少保留 CPU／RAM。
     /// </summary>
     public static IReadOnlyList<BarColumn> Build(MetricsSnapshot m, VisibleItems visible)
     {
@@ -37,16 +38,29 @@ internal static class BarContent
             Level level = Thresholds.ForBattery(m.Battery);
             columns.Add(new BarColumn(
                 new BarCell("電量", Percent(m.Battery.Percent), level),
-                PowerCell(m.Battery, level),
+                PowerCell(m.Battery, m.BatteryDetail, level),
                 PercentTemplate));
         }
 
-        if (visible.CpuRam || (columns.Count == 0 && !visible.Disk && !visible.Network))
+        if (visible.BatteryDetail && m.Battery.HasBattery && m.BatteryDetail is BatteryDetail detail)
         {
             columns.Add(new BarColumn(
-                new BarCell("CPU", Percent(m.CpuPercent), Thresholds.ForCpu(m.CpuPercent)),
-                new BarCell("RAM", Percent(m.RamPercent), Thresholds.ForRam(m.RamPercent)),
-                PercentTemplate));
+                new BarCell("功耗", Watts(detail.PowerWatts), detail.PowerWatts is null ? Level.Neutral : Level.Good),
+                new BarCell("健康", Percent(detail.HealthPercent), Thresholds.ForBatteryHealth(detail.HealthPercent)),
+                WattsTemplate));
+        }
+
+        if (visible.CpuRam)
+        {
+            columns.Add(CpuRamColumn(m));
+        }
+
+        if (visible.Gpu && (m.GpuPercent is not null || m.GpuMemoryBytes is not null))
+        {
+            columns.Add(new BarColumn(
+                new BarCell("GPU", Percent(m.GpuPercent), Thresholds.ForGpu(m.GpuPercent)),
+                new BarCell("顯存", ByteRate.Format(m.GpuMemoryBytes), m.GpuMemoryBytes is null ? Level.Neutral : Level.Good),
+                RateTemplate));
         }
 
         if (visible.Disk)
@@ -67,8 +81,18 @@ internal static class BarContent
                 RateTemplate));
         }
 
+        if (columns.Count == 0)
+        {
+            columns.Add(CpuRamColumn(m));
+        }
+
         return columns;
     }
+
+    private static BarColumn CpuRamColumn(MetricsSnapshot m) => new(
+        new BarCell("CPU", Percent(m.CpuPercent), Thresholds.ForCpu(m.CpuPercent)),
+        new BarCell("RAM", Percent(m.RamPercent), Thresholds.ForRam(m.RamPercent)),
+        PercentTemplate);
 
     /// <summary>系統匣圖示的提示文字，例如「電量 82% · CPU 12% · RAM 61% · ↑1.1KB ↓8.6KB」。</summary>
     public static string TrayText(MetricsSnapshot m)
@@ -91,12 +115,14 @@ internal static class BarContent
         return string.Join(" · ", parts);
     }
 
-    /// <summary>電池欄的下格：充電中、已接電源，或估計的剩餘時間。</summary>
-    private static BarCell PowerCell(BatterySnapshot battery, Level level)
+    /// <summary>電池欄的下格：估計的充滿時間、充電中、已接電源，或估計的剩餘時間。</summary>
+    private static BarCell PowerCell(BatterySnapshot battery, BatteryDetail? detail, Level level)
     {
         if (battery.IsCharging)
         {
-            return new BarCell("電源", "充電中", level);
+            return detail?.SecondsToFull is int toFull
+                ? new BarCell("充滿", Duration(toFull), level)
+                : new BarCell("電源", "充電中", level);
         }
 
         if (battery.IsPluggedIn)
@@ -114,6 +140,22 @@ internal static class BarContent
             ? "--"
             : ((int)Math.Round(value.Value, MidpointRounding.AwayFromZero)).ToString(CultureInfo.InvariantCulture) + "%";
 
+    /// <summary>瓦數附正負號：充電為「+45.0W」、放電為「-12.3W」；沒有數值時為「--」。</summary>
+    internal static string Watts(double? watts)
+    {
+        if (watts is not double value || !double.IsFinite(value))
+        {
+            return "--";
+        }
+
+        double magnitude = Math.Abs(value);
+        string number = magnitude >= 99.95
+            ? Math.Round(magnitude, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture)
+            : magnitude.ToString("0.0", CultureInfo.InvariantCulture);
+        string sign = number is "0.0" ? "" : value > 0 ? "+" : "-";
+        return sign + number + "W";
+    }
+
     /// <summary>秒數轉成「時:分」，例如 5400 秒為「1:30」。</summary>
     internal static string Duration(int seconds)
     {
@@ -122,7 +164,7 @@ internal static class BarContent
     }
 }
 
-/// <summary>把「位元組／秒」轉成好讀的字串。為了節省空間不附「/s」。</summary>
+/// <summary>把位元組數（每秒的傳輸量，或記憶體用量）轉成好讀的字串。為了節省空間，速率不附「/s」。</summary>
 internal static class ByteRate
 {
     /// <summary>例如 46285 → 「45.2KB」、4089446 → 「3.9MB」；沒有數值時為「--」。</summary>

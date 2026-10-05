@@ -25,14 +25,18 @@ internal sealed class AppSettings
     // 要顯示的項目，預設全部顯示。舊版的設定檔沒有這些欄位，讀取後維持預設值。
     public bool ShowBattery { get; set; } = true;
 
+    public bool ShowBatteryDetail { get; set; } = true;
+
     public bool ShowCpuRam { get; set; } = true;
+
+    public bool ShowGpu { get; set; } = true;
 
     public bool ShowDisk { get; set; } = true;
 
     public bool ShowNetwork { get; set; } = true;
 
     [JsonIgnore]
-    public VisibleItems Visible => new(ShowBattery, ShowCpuRam, ShowDisk, ShowNetwork);
+    public VisibleItems Visible => new(ShowBattery, ShowBatteryDetail, ShowCpuRam, ShowGpu, ShowDisk, ShowNetwork);
 
     /// <summary>使用者拖曳後的錨點（橫條底邊中點）；沒拖過為 null。</summary>
     [JsonIgnore]
