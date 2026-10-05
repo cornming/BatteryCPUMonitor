@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace BatteryCPUMonitor;
 
 /// <summary>
-/// 程式自動記住的狀態（橫條位置、滑鼠穿透、顯示項目），存在使用者自己的 AppData 資料夾。
+/// 程式自動記住的狀態（橫條位置、滑鼠穿透、顯示模式與項目），存在使用者自己的 AppData 資料夾。
 /// 使用者不需要也不必手動編輯這個檔案。
 /// </summary>
 internal sealed class AppSettings
@@ -21,6 +21,9 @@ internal sealed class AppSettings
     public int? AnchorY { get; set; }
 
     public bool ClickThrough { get; set; }
+
+    /// <summary>嵌入工作列（true）或浮動橫條（false）。</summary>
+    public bool TaskbarMode { get; set; }
 
     // 要顯示的項目，預設全部顯示。舊版的設定檔沒有這些欄位，讀取後維持預設值。
     public bool ShowBattery { get; set; } = true;

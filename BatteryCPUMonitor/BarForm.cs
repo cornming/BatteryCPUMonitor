@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using BatteryCPUMonitor.Metrics;
 
 namespace BatteryCPUMonitor;
@@ -6,6 +7,7 @@ namespace BatteryCPUMonitor;
 /// <summary>
 /// 置頂、無邊框的資訊橫條：以兩列格狀版面顯示電池、CPU、記憶體、GPU、磁碟與網路，數值各自依門檻變色。
 /// 左鍵拖曳可移動（位置會記住），滑鼠移入時變得不透明，右鍵或系統匣圖示開啟選單。
+/// 也可以切換成「嵌入工作列」，這時浮動橫條會隱藏，內容改由 <see cref="TaskbarForm"/> 畫在工作列上。
 /// </summary>
 internal sealed class BarForm : Form
 {
@@ -17,6 +19,7 @@ internal sealed class BarForm : Form
     private const int RefreshMs = 1000;
     private const int MaxTrayTextLength = 63;
     private const int CornerRadiusAt96Dpi = 7;
+    private const int TaskbarRetryMs = 5000;
 
     // 兩者都小於 1，視窗才會一直維持「分層視窗」樣式；滑鼠穿透需要它，切換時也不會閃爍。
     private const double RestingOpacity = 0.8;
@@ -40,6 +43,7 @@ internal sealed class BarForm : Form
     private readonly ContextMenuStrip _menu = new();
     private readonly ToolStripMenuItem _autoStartItem = new("開機自動啟動");
     private readonly ToolStripMenuItem _clickThroughItem = new("滑鼠穿透");
+    private readonly ToolStripMenuItem _taskbarModeItem = new("嵌入工作列");
     private readonly ToolStripMenuItem _showBatteryItem = new("電池");
     private readonly ToolStripMenuItem _showBatteryDetailItem = new("電池詳情（功耗、健康度）");
     private readonly ToolStripMenuItem _showCpuRamItem = new("CPU 與記憶體");
@@ -57,6 +61,11 @@ internal sealed class BarForm : Form
     private MetricsSnapshot _snapshot = MetricsSnapshot.Empty;
     private GridResult _layout = new(Size.Empty, []);
     private bool _sampling;
+
+    // 嵌入工作列用的小工具；只有在「嵌入工作列」開啟而且成功掛上時才存在。
+    private TaskbarForm? _taskbar;
+    private bool _taskbarActive;
+    private long _taskbarRetryAt;
 
     /// <summary>使用者拖曳後記下的錨點（橫條底邊中點）；沒拖過就是 null，跟著預設位置走。</summary>
     private Point? _userAnchor;
@@ -97,7 +106,21 @@ internal sealed class BarForm : Form
 
         _timer.Interval = FirstRefreshMs;
         _timer.Tick += (_, _) => RefreshMetrics();
+
+        // 先把視窗建立起來（還不顯示）。嵌入工作列時這個視窗會一直隱藏，
+        // 但選單與程式結束的流程都需要它存在。
+        _ = Handle;
+
+        _tray.Visible = true;
+
+        // 電池狀態可以立即讀到，先填上；其餘數值以「--」佔位，約 0.3 秒後補上。
+        _snapshot = MetricsSnapshot.Empty with { Battery = BatteryReader.Read() };
+        ApplyLayout();
+        _timer.Start();
     }
+
+    /// <summary>嵌入工作列期間，浮動橫條保持隱藏。</summary>
+    protected override void SetVisibleCore(bool value) => base.SetVisibleCore(value && !_taskbarActive);
 
     protected override CreateParams CreateParams
     {
@@ -115,22 +138,12 @@ internal sealed class BarForm : Form
         }
     }
 
-    protected override void OnLoad(EventArgs e)
-    {
-        base.OnLoad(e);
-        _tray.Visible = true;
-
-        // 電池狀態可以立即讀到，先填上；其餘數值以「--」佔位，約 0.3 秒後補上。
-        _snapshot = MetricsSnapshot.Empty with { Battery = BatteryReader.Read() };
-        ApplyLayout();
-        _timer.Start();
-    }
-
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
             _timer.Dispose();
+            ReleaseTaskbar(); // Windows 10 會在這裡把工作清單還原
             _collector.Dispose();
             _tray.Visible = false;
             _tray.Dispose();
@@ -166,6 +179,7 @@ internal sealed class BarForm : Form
 
         _autoStartItem.Click += (_, _) => AutoStart.SetEnabled(!AutoStart.IsEnabled());
         _clickThroughItem.Click += (_, _) => SetClickThrough(!_settings.ClickThrough);
+        _taskbarModeItem.Click += (_, _) => ToggleTaskbarMode();
         resetPosition.Click += (_, _) => ResetPosition();
         close.Click += (_, _) => Close();
 
@@ -183,11 +197,14 @@ internal sealed class BarForm : Form
             _showNetworkItem.Checked = _settings.ShowNetwork;
             _autoStartItem.Checked = AutoStart.IsEnabled();
             _clickThroughItem.Checked = _settings.ClickThrough;
+            _taskbarModeItem.Checked = _settings.TaskbarMode;
+            resetPosition.Enabled = !_taskbarActive;
         };
 
         _menu.Items.Add(new ToolStripMenuItem($"BatteryCPUMonitor v{Application.ProductVersion}") { Enabled = false });
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(showItems);
+        _menu.Items.Add(_taskbarModeItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_autoStartItem);
         _menu.Items.Add(_clickThroughItem);
@@ -210,6 +227,7 @@ internal sealed class BarForm : Form
 
         UpdateStyles();  // 依 CreateParams 重新套用視窗樣式
         TopMost = true;  // 樣式更新後重新確認置頂
+        ApplyLayout();   // 嵌入工作列時，由這裡把設定帶給工作列上的小工具
 
         if (enabled)
         {
@@ -219,9 +237,67 @@ internal sealed class BarForm : Form
             _tray.ShowBalloonTip(
                 5000,
                 "已開啟滑鼠穿透",
-                "橫條不會再擋住滑鼠。要關閉或移動橫條，請在系統匣的電池圖示上按右鍵。",
+                "橫條不會再擋住滑鼠。要關閉滑鼠穿透或做其他設定，請在系統匣的電池圖示上按右鍵。",
                 ToolTipIcon.Info);
         }
+    }
+
+    private void ToggleTaskbarMode()
+    {
+        _settings.TaskbarMode = !_settings.TaskbarMode;
+        _settings.Save(_settingsPath);
+        _taskbarRetryAt = 0;
+        ApplyLayout();
+
+        if (_settings.TaskbarMode && !_taskbarActive)
+        {
+            _tray.ShowBalloonTip(
+                5000,
+                "目前無法嵌入工作列",
+                "找不到可用的工作列（工作列在螢幕左右兩側時不支援）。先以浮動橫條顯示，之後會自動再試。",
+                ToolTipIcon.Warning);
+        }
+    }
+
+    /// <summary>確保工作列上的小工具存在而且還掛著；做不到時回傳 false，由浮動橫條頂替。</summary>
+    private bool EnsureTaskbar()
+    {
+        if (_taskbar is { IsAttached: true })
+        {
+            return true;
+        }
+
+        // Explorer 重新啟動後舊的小工具會失效，丟掉重建。失敗的話隔幾秒再試，不必每秒都試。
+        ReleaseTaskbar();
+        if (Environment.TickCount64 < _taskbarRetryAt || !TaskbarForm.TaskbarAvailable())
+        {
+            return false;
+        }
+
+        var taskbar = new TaskbarForm(ShowMenuAtCursor);
+        if (!taskbar.TryAttach(_settings.ClickThrough))
+        {
+            taskbar.Dispose();
+            _taskbarRetryAt = Environment.TickCount64 + TaskbarRetryMs;
+            return false;
+        }
+
+        _taskbar = taskbar;
+        return true;
+    }
+
+    private void ReleaseTaskbar()
+    {
+        _taskbar?.Dispose();
+        _taskbar = null;
+    }
+
+    /// <summary>在工作列的小工具上按右鍵時顯示選單。</summary>
+    private void ShowMenuAtCursor()
+    {
+        // 先把自己設為前景，選單才會在使用者點別處時自動關閉（系統匣圖示的選單也是這樣做）。
+        SetForegroundWindow(Handle);
+        _menu.Show(Cursor.Position);
     }
 
     private void ResetPosition()
@@ -298,15 +374,36 @@ internal sealed class BarForm : Form
 
     private int MeasureWidth(string text) => TextRenderer.MeasureText(text, _font, Unbounded, TextFlags).Width;
 
-    /// <summary>重新排版，讓視窗大小貼合內容，並依錨點重新擺放。</summary>
+    /// <summary>
+    /// 依目前的數值與設定更新畫面：嵌入工作列時交給工作列上的小工具，否則重新排版浮動橫條。
+    /// </summary>
     private void ApplyLayout()
     {
+        IReadOnlyList<BarColumn> columns = BarContent.Build(_snapshot, _settings.Visible);
+
+        bool useTaskbar = _settings.TaskbarMode && EnsureTaskbar();
+        if (useTaskbar)
+        {
+            _taskbar!.UpdateContent(columns, _settings.ClickThrough);
+        }
+        else
+        {
+            ReleaseTaskbar();
+        }
+
+        if (_taskbarActive != useTaskbar)
+        {
+            _taskbarActive = useTaskbar;
+            Visible = !useTaskbar;
+        }
+
+        if (useTaskbar)
+        {
+            return;
+        }
+
         int rowHeight = TextRenderer.MeasureText("電0", _font, Unbounded, TextFlags).Height;
-        _layout = GridLayout.Compute(
-            BarContent.Build(_snapshot, _settings.Visible),
-            MeasureWidth,
-            rowHeight,
-            GridSpacing.ForDpi(_fontDpi));
+        _layout = GridLayout.Compute(columns, MeasureWidth, rowHeight, GridSpacing.ForDpi(_fontDpi));
 
         Point anchor;
         Rectangle workingArea;
@@ -484,6 +581,10 @@ internal sealed class BarForm : Form
             Opacity = RestingOpacity;
         }
     }
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr window);
 
     private static Icon LoadIcon()
     {
