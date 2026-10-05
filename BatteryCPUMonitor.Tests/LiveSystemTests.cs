@@ -76,7 +76,8 @@ public class LiveSystemTests
         Assert.NotNull(items);
         Assert.True(items.Count >= 2, $"筆數 = {items.Count}");
         Assert.True(items.Any(i => i.Instance.Contains("_Total")), $"名稱 = {string.Join(", ", items.Select(i => i.Instance))}");
-        Assert.True(items.All(i => i.Value is >= 0 and <= 100), $"數值 = {string.Join(", ", items.Select(i => i.Value))}");
+        // 「Processor Utility」在處理器超頻運作（Turbo）時本來就會超過 100，所以只檢查數值合理。
+        Assert.True(items.All(i => i.Value is >= 0 and < 1000), $"數值 = {string.Join(", ", items.Select(i => i.Value))}");
     }
 
     [Fact]
