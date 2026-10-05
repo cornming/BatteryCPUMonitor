@@ -1,0 +1,94 @@
+name: Build
+
+# 每次推送到 master 都會：建置 → 測試 → 產生兩種單一執行檔 → 自動跳版號並發布 Release。
+# 版號規則見 .github/scripts/next-version.sh。只改 Markdown 文件不會觸發。
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  PROJECT: BatteryCPUMonitor/BatteryCPUMonitor.csproj
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 計算版號需要完整的提交紀錄與標籤
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: 計算版本號
+        id: version
+        run: |
+          next=$(bash .github/scripts/next-version.sh)
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$GITHUB_REF" = "refs/heads/master" ]; then
+            echo "version=$next" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$next-dev" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "下一個版本：$next"
+
+      - name: 建置
+        run: dotnet build BatteryCPUMonitor.sln -c Release -p:Version=${{ steps.version.outputs.version }}
+
+      - name: 測試
+        run: dotnet test BatteryCPUMonitor.sln -c Release --no-build
+
+      - name: 產生單一執行檔
+        run: |
+          v=${{ steps.version.outputs.version }}
+
+          # 精簡版：需要電腦已安裝 .NET 10 桌面執行階段
+          dotnet publish "$PROJECT" -c Release -r win-x64 --self-contained false \
+            -p:PublishSingleFile=true -p:Version=$v -o publish/lite
+
+          # 免安裝完整版：執行階段一併包進 exe
+          dotnet publish "$PROJECT" -c Release -r win-x64 --self-contained true \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true -p:Version=$v -o publish/standalone
+
+          mkdir -p dist
+          cp publish/lite/BatteryCPUMonitor.exe "dist/BatteryCPUMonitor-v$v.exe"
+          cp publish/standalone/BatteryCPUMonitor.exe "dist/BatteryCPUMonitor-v$v-standalone.exe"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: BatteryCPUMonitor-v${{ steps.version.outputs.version }}
+          path: dist/*.exe
+          if-no-files-found: error
+
+      - name: 發布 Release
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=${{ steps.version.outputs.version }}
+          bash .github/scripts/release-notes.sh "$v" > release-notes.md
+          cat release-notes.md
+          gh release create "v$v" dist/*.exe \
+            --target "$GITHUB_SHA" \
+            --title "v$v" \
+            --notes-file release-notes.md
