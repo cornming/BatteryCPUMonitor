@@ -50,9 +50,31 @@ public class ThresholdsTests
         Assert.Equal(expected, Thresholds.ForNetworkRate(bytesPerSecond));
     }
 
+    [Theory]
+    [InlineData(59.9, Level.Good)]
+    [InlineData(60.0, Level.Warn)]
+    [InlineData(85.0, Level.Critical)]
+    public void GPU門檻_六十轉黃_八十五轉紅(double percent, Level expected)
+    {
+        Assert.Equal(expected, Thresholds.ForGpu(percent));
+    }
+
+    [Theory]
+    [InlineData(100.0, Level.Good)]
+    [InlineData(80.0, Level.Good)]
+    [InlineData(79.9, Level.Warn)]
+    [InlineData(60.0, Level.Warn)]
+    [InlineData(59.9, Level.Critical)]
+    public void 電池健康度門檻_低於八十轉黃_低於六十轉紅(double percent, Level expected)
+    {
+        Assert.Equal(expected, Thresholds.ForBatteryHealth(percent));
+    }
+
     [Fact]
     public void 沒有數值時不帶警示等級()
     {
+        Assert.Equal(Level.Neutral, Thresholds.ForGpu(null));
+        Assert.Equal(Level.Neutral, Thresholds.ForBatteryHealth(null));
         Assert.Equal(Level.Neutral, Thresholds.ForCpu(null));
         Assert.Equal(Level.Neutral, Thresholds.ForRam(null));
         Assert.Equal(Level.Neutral, Thresholds.ForDiskRate(null));

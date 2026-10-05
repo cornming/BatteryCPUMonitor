@@ -42,15 +42,63 @@ public class LiveSystemTests
         if (NotWindows) { return; }
 
         using var collector = new MetricsCollector();
-        collector.Sample();
+        collector.Sample(VisibleItems.All);
         Thread.Sleep(1100);
-        MetricsSnapshot m = collector.Sample();
+        MetricsSnapshot m = collector.Sample(VisibleItems.All);
 
         Assert.True(m.CpuPercent is >= 0 and <= 100, $"CPU = {m.CpuPercent}");
         Assert.True(m.RamPercent is > 0 and <= 100, $"RAM = {m.RamPercent}");
         Assert.True(m.DiskReadBytesPerSecond is >= 0, $"讀取 = {m.DiskReadBytesPerSecond}");
         Assert.True(m.DiskWriteBytesPerSecond is >= 0, $"寫入 = {m.DiskWriteBytesPerSecond}");
         Assert.True(m.Network is { UploadBytesPerSecond: >= 0, DownloadBytesPerSecond: >= 0 }, $"網路 = {m.Network}");
+
+        // 建置主機不一定有 GPU；有數值的話必須在合理範圍內。
+        Assert.True(m.GpuPercent is null or (>= 0 and <= 100), $"GPU = {m.GpuPercent}");
+        Assert.True(m.GpuMemoryBytes is null or >= 0, $"顯存 = {m.GpuMemoryBytes}");
+    }
+
+    [Fact]
+    public void 效能計數器_萬用字元計數器可以讀出每個執行個體的名稱與數值()
+    {
+        if (NotWindows) { return; }
+
+        using PdhQuery? query = PdhQuery.TryOpen();
+        Assert.NotNull(query);
+        IntPtr? perCore = query.TryAdd(@"\Processor Information(*)\% Processor Utility");
+        Assert.NotNull(perCore);
+
+        query.Collect();
+        Thread.Sleep(300);
+        query.Collect();
+        var items = query.ReadArray(perCore);
+
+        // 每個邏輯處理器各一筆，再加上各群組與全部的總計，至少會有兩筆；名稱裡一定有「_Total」。
+        Assert.NotNull(items);
+        Assert.True(items.Count >= 2, $"筆數 = {items.Count}");
+        Assert.True(items.Any(i => i.Instance.Contains("_Total")), $"名稱 = {string.Join(", ", items.Select(i => i.Instance))}");
+        Assert.True(items.All(i => i.Value is >= 0 and <= 100), $"數值 = {string.Join(", ", items.Select(i => i.Value))}");
+    }
+
+    [Fact]
+    public void 電池裝置列舉_正常結束()
+    {
+        if (NotWindows) { return; }
+
+        List<string> paths = BatteryDetailReader.EnumerateDevicePaths(out int lastError);
+
+        // 259 = 沒有更多項目，代表列舉用的資料結構大小正確（寫錯會得到別的錯誤碼）。
+        Assert.True(lastError == 259, $"錯誤碼 = {lastError}，找到 {paths.Count} 個電池裝置");
+    }
+
+    [Fact]
+    public void 電池詳情_沒有電池時回傳空值而不是當掉()
+    {
+        if (NotWindows) { return; }
+
+        using var reader = new BatteryDetailReader();
+        BatteryDetail? detail = reader.Read(pluggedIn: true, charging: false);
+
+        Assert.True(detail is null || detail.Value.HealthPercent is null or (> 0 and <= 100), $"電池詳情 = {detail}");
     }
 
     [Fact]
@@ -61,7 +109,7 @@ public class LiveSystemTests
         var collector = new MetricsCollector();
         collector.Dispose();
 
-        Assert.Equal(MetricsSnapshot.Empty, collector.Sample());
+        Assert.Equal(MetricsSnapshot.Empty, collector.Sample(VisibleItems.All));
     }
 
     [Fact]

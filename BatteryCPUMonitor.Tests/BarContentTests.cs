@@ -82,7 +82,7 @@ public class BarContentTests
     [Fact]
     public void 關掉的項目不會出現()
     {
-        var visible = new VisibleItems(Battery: false, CpuRam: true, Disk: false, Network: true);
+        var visible = new VisibleItems(Battery: false, BatteryDetail: false, CpuRam: true, Gpu: false, Disk: false, Network: true);
         var columns = BarContent.Build(Snapshot(Battery(82)), visible);
 
         Assert.Equal(2, columns.Count);
@@ -93,7 +93,7 @@ public class BarContentTests
     [Fact]
     public void 全部關掉時_至少保留CPU與RAM()
     {
-        var columns = BarContent.Build(Snapshot(Battery(82)), new VisibleItems(false, false, false, false));
+        var columns = BarContent.Build(Snapshot(Battery(82)), new VisibleItems(false, false, false, false, false, false));
 
         Assert.Equal("CPU", Assert.Single(columns).Top.Label);
     }
@@ -101,7 +101,7 @@ public class BarContentTests
     [Fact]
     public void 只勾電池但電腦沒有電池_改顯示CPU與RAM而不是空白()
     {
-        var columns = BarContent.Build(Snapshot(NoBattery), new VisibleItems(true, false, false, false));
+        var columns = BarContent.Build(Snapshot(NoBattery), new VisibleItems(true, true, false, false, false, false));
 
         Assert.Equal("CPU", Assert.Single(columns).Top.Label);
     }
@@ -135,6 +135,111 @@ public class BarContentTests
         Assert.Equal(Level.Critical, columns[1].Bottom.Level);
         Assert.Equal(Level.Warn, columns[2].Top.Level);
         Assert.Equal(Level.Critical, columns[2].Bottom.Level);
+    }
+
+    [Fact]
+    public void 有GPU數值時_GPU欄排在CPU之後()
+    {
+        var snapshot = Snapshot(NoBattery) with { GpuPercent = 35.2, GpuMemoryBytes = 3.2 * 1024 * MB };
+
+        var columns = BarContent.Build(snapshot, VisibleItems.All);
+
+        Assert.Equal(4, columns.Count);
+        Assert.Equal("CPU", columns[0].Top.Label);
+        Assert.Equal(new BarCell("GPU", "35%", Level.Good), columns[1].Top);
+        Assert.Equal(new BarCell("顯存", "3.2GB", Level.Good), columns[1].Bottom);
+    }
+
+    [Fact]
+    public void GPU使用率依門檻變色()
+    {
+        var snapshot = Snapshot(NoBattery) with { GpuPercent = 90, GpuMemoryBytes = 512 * MB };
+
+        var columns = BarContent.Build(snapshot, VisibleItems.All);
+
+        Assert.Equal(new BarCell("GPU", "90%", Level.Critical), columns[1].Top);
+        Assert.Equal(new BarCell("顯存", "512MB", Level.Good), columns[1].Bottom);
+    }
+
+    [Fact]
+    public void 這台電腦沒有GPU計數器_不會出現GPU欄()
+    {
+        var columns = BarContent.Build(Snapshot(NoBattery), VisibleItems.All);
+
+        Assert.True(columns.All(c => c.Top.Label != "GPU"));
+    }
+
+    [Fact]
+    public void 只讀得到顯示記憶體_GPU使用率以兩個減號佔位()
+    {
+        var snapshot = Snapshot(NoBattery) with { GpuMemoryBytes = 512 * MB };
+
+        var columns = BarContent.Build(snapshot, VisibleItems.All);
+
+        Assert.Equal(new BarCell("GPU", "--", Level.Neutral), columns[1].Top);
+    }
+
+    [Fact]
+    public void 電池詳情欄_放電中顯示負的功耗與健康度()
+    {
+        var snapshot = Snapshot(Battery(82)) with { BatteryDetail = new BatteryDetail(PowerWatts: -12.34, HealthPercent: 91.4, SecondsToFull: null) };
+
+        var columns = BarContent.Build(snapshot, VisibleItems.All);
+
+        Assert.Equal(5, columns.Count);
+        Assert.Equal("電量", columns[0].Top.Label);
+        Assert.Equal(new BarCell("功耗", "-12.3W", Level.Good), columns[1].Top);
+        Assert.Equal(new BarCell("健康", "91%", Level.Good), columns[1].Bottom);
+        Assert.Equal("CPU", columns[2].Top.Label);
+    }
+
+    [Fact]
+    public void 電池詳情欄_健康度偏低時變色_韌體沒回報的項目以減號佔位()
+    {
+        var snapshot = Snapshot(Battery(82)) with { BatteryDetail = new BatteryDetail(PowerWatts: null, HealthPercent: 55, SecondsToFull: null) };
+
+        var columns = BarContent.Build(snapshot, VisibleItems.All);
+
+        Assert.Equal(new BarCell("功耗", "--", Level.Neutral), columns[1].Top);
+        Assert.Equal(new BarCell("健康", "55%", Level.Critical), columns[1].Bottom);
+    }
+
+    [Fact]
+    public void 讀不到電池詳情_不會出現電池詳情欄()
+    {
+        var columns = BarContent.Build(Snapshot(Battery(82)), VisibleItems.All);
+
+        Assert.True(columns.All(c => c.Top.Label != "功耗"));
+    }
+
+    [Fact]
+    public void 充電中且估得出充滿時間_電池下格顯示充滿時間()
+    {
+        var snapshot = Snapshot(Battery(40, pluggedIn: true, charging: true))
+            with { BatteryDetail = new BatteryDetail(PowerWatts: 45, HealthPercent: 95, SecondsToFull: 2700) };
+
+        var columns = BarContent.Build(snapshot, VisibleItems.All);
+
+        Assert.Equal(new BarCell("充滿", "0:45", Level.Good), columns[0].Bottom);
+        Assert.Equal(new BarCell("功耗", "+45.0W", Level.Good), columns[1].Top);
+    }
+
+    [Theory]
+    [InlineData(45.0, "+45.0W")]
+    [InlineData(-12.34, "-12.3W")]
+    [InlineData(0.0, "0.0W")]
+    [InlineData(-0.04, "0.0W")]
+    [InlineData(99.94, "+99.9W")]
+    [InlineData(-120.4, "-120W")]
+    public void 瓦數附正負號_未滿一百顯示一位小數(double watts, string expected)
+    {
+        Assert.Equal(expected, BarContent.Watts(watts));
+    }
+
+    [Fact]
+    public void 沒有瓦數時以兩個減號代替()
+    {
+        Assert.Equal("--", BarContent.Watts(null));
     }
 
     [Fact]

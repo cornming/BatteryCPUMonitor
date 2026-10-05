@@ -81,9 +81,11 @@ public class AppSettingsTests : IDisposable
     [Fact]
     public void 關掉的顯示項目_存檔後再讀取仍是關的()
     {
-        new AppSettings { ShowDisk = false, ShowBattery = false }.Save(SettingsPath);
+        new AppSettings { ShowDisk = false, ShowBattery = false, ShowGpu = false }.Save(SettingsPath);
 
-        Assert.Equal(new VisibleItems(Battery: false, CpuRam: true, Disk: false, Network: true), AppSettings.Load(SettingsPath).Visible);
+        Assert.Equal(
+            new VisibleItems(Battery: false, BatteryDetail: true, CpuRam: true, Gpu: false, Disk: false, Network: true),
+            AppSettings.Load(SettingsPath).Visible);
     }
 
     [Fact]
