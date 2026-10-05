@@ -58,18 +58,14 @@ jobs:
         id: test
         env:
           MSYS_NO_PATHCONV: 1
+          PYTHONUTF8: 1
         run: |
+          # 測試失敗時先不中斷，讓下一行把失敗原因整理成錯誤註記。
           dotnet test BatteryCPUMonitor.sln -c Release --no-build \
-            --logger "trx;LogFileName=results.trx" --results-directory testresults
+            --logger "trx;LogFileName=results.trx" --results-directory testresults || true
 
-          # 從測試報告讀出通過的數量；一項都沒跑到視為失敗，避免「沒測到卻顯示成功」。
-          passed=$(grep -o 'passed="[0-9]*"' testresults/results.trx | head -1 | grep -o '[0-9]*' || true)
-          echo "通過 ${passed:-0} 項測試"
-          if [ "${passed:-0}" -eq 0 ]; then
-            echo "::error::沒有執行到任何測試"
-            exit 1
-          fi
-          echo "passed=$passed" >> "$GITHUB_OUTPUT"
+          # 有測試失敗，或一項都沒執行到，這一步就會失敗。
+          python .github/scripts/test-summary.py testresults/results.trx
 
       - name: 產生單一執行檔
         run: |
