@@ -51,19 +51,48 @@ public class BarTextTests
         Assert.StartsWith(expectedPrefix + " / ", BarText.Format(NoBattery, cpu, 50));
     }
 
-    [Theory]
-    [InlineData(0.0, 0, 255)]
-    [InlineData(100.0, 255, 0)]
-    [InlineData(50.0, 128, 127)]
-    [InlineData(250.0, 255, 0)]
-    public void 顏色隨CPU由綠轉紅(double cpu, int expectedRed, int expectedGreen)
+    [Fact]
+    public void 各段文字帶有各自的警示等級()
     {
-        Assert.Equal((expectedRed, expectedGreen, 0), BarText.ColorForCpu(cpu));
+        // 電量 15% 放電中 → 紅；CPU 70% → 黃；RAM 50% → 綠。
+        var segments = BarText.Build(Battery(15), 70, 50);
+
+        Assert.Equal(Level.Critical, segments.Single(s => s.Text == "電量:15%").Level);
+        Assert.Equal(Level.Warn, segments.Single(s => s.Text == "CPU:70%").Level);
+        Assert.Equal(Level.Good, segments.Single(s => s.Text == "RAM:50%").Level);
     }
 
     [Fact]
-    public void 沒有CPU數值時為綠色()
+    public void 分隔符號不帶警示等級()
     {
-        Assert.Equal((0, 255, 0), BarText.ColorForCpu(null));
+        var segments = BarText.Build(Battery(15), 99, 99);
+
+        Assert.True(segments.Where(s => s.Text == " / ").All(s => s.Level == Level.Neutral));
+        Assert.Equal(2, segments.Count(s => s.Text == " / "));
+    }
+
+    [Fact]
+    public void 充電狀態文字與電量同色()
+    {
+        var segments = BarText.Build(Battery(10, pluggedIn: true, charging: true), 5, 50);
+
+        Assert.Equal(Level.Good, segments.Single(s => s.Text == "電量:10%").Level);
+        Assert.Equal(Level.Good, segments.Single(s => s.Text == "充電中").Level);
+    }
+
+    [Fact]
+    public void 尚無數值的項目不帶警示等級()
+    {
+        var segments = BarText.Build(NoBattery, null, null);
+
+        Assert.True(segments.All(s => s.Level == Level.Neutral));
+    }
+
+    [Fact]
+    public void 各段文字串起來等於整行文字()
+    {
+        var battery = Battery(82, pluggedIn: true);
+
+        Assert.Equal(BarText.Format(battery, 12, 61), BarText.Plain(BarText.Build(battery, 12, 61)));
     }
 }

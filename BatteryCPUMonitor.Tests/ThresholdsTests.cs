@@ -1,0 +1,66 @@
+using BatteryCPUMonitor.Metrics;
+using Xunit;
+
+namespace BatteryCPUMonitor.Tests;
+
+public class ThresholdsTests
+{
+    private static BatterySnapshot Battery(int percent, bool pluggedIn = false, bool charging = false) =>
+        new(HasBattery: true, Percent: percent, IsPluggedIn: pluggedIn, IsCharging: charging, SecondsRemaining: null);
+
+    [Theory]
+    [InlineData(0.0, Level.Good)]
+    [InlineData(59.9, Level.Good)]
+    [InlineData(60.0, Level.Warn)]
+    [InlineData(84.9, Level.Warn)]
+    [InlineData(85.0, Level.Critical)]
+    [InlineData(100.0, Level.Critical)]
+    public void CPU門檻_六十轉黃_八十五轉紅(double percent, Level expected)
+    {
+        Assert.Equal(expected, Thresholds.ForCpu(percent));
+    }
+
+    [Theory]
+    [InlineData(79.9, Level.Good)]
+    [InlineData(80.0, Level.Warn)]
+    [InlineData(89.9, Level.Warn)]
+    [InlineData(90.0, Level.Critical)]
+    public void RAM門檻_八十轉黃_九十轉紅(double percent, Level expected)
+    {
+        Assert.Equal(expected, Thresholds.ForRam(percent));
+    }
+
+    [Fact]
+    public void 沒有數值時不帶警示等級()
+    {
+        Assert.Equal(Level.Neutral, Thresholds.ForCpu(null));
+        Assert.Equal(Level.Neutral, Thresholds.ForRam(null));
+    }
+
+    [Theory]
+    [InlineData(100, Level.Good)]
+    [InlineData(41, Level.Good)]
+    [InlineData(40, Level.Warn)]
+    [InlineData(21, Level.Warn)]
+    [InlineData(20, Level.Critical)]
+    [InlineData(1, Level.Critical)]
+    public void 電量門檻_放電中四十轉黃_二十轉紅(int percent, Level expected)
+    {
+        Assert.Equal(expected, Thresholds.ForBattery(Battery(percent)));
+    }
+
+    [Fact]
+    public void 電量很低但接著電源_仍視為正常()
+    {
+        Assert.Equal(Level.Good, Thresholds.ForBattery(Battery(5, pluggedIn: true, charging: true)));
+        Assert.Equal(Level.Good, Thresholds.ForBattery(Battery(5, pluggedIn: true)));
+    }
+
+    [Fact]
+    public void 沒有電池時不帶警示等級()
+    {
+        var none = new BatterySnapshot(HasBattery: false, Percent: null, IsPluggedIn: true, IsCharging: false, SecondsRemaining: null);
+
+        Assert.Equal(Level.Neutral, Thresholds.ForBattery(none));
+    }
+}
