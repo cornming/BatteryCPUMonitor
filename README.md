@@ -28,10 +28,22 @@
 | 操作 | 效果 |
 | --- | --- |
 | 滑鼠移到橫條上 | 字體放大，方便閱讀 |
-| 左鍵按住拖曳 | 移動橫條（位置在本次執行期間保留） |
-| 右鍵 | 開啟選單，可查看版本或關閉 |
+| 左鍵按住拖曳 | 移動橫條，可拖到其他螢幕；位置會記住，下次啟動回到原處 |
+| 在橫條或系統匣圖示上按右鍵 | 開啟選單 |
+| 滑鼠停在系統匣圖示上 | 以提示文字顯示目前數值 |
 
-橫條預設出現在主螢幕底部正中央、工作列上方。
+橫條預設出現在主螢幕底部正中央、工作列上方，而且不會被拖出螢幕外。
+
+### 選單
+
+| 項目 | 說明 |
+| --- | --- |
+| 開機自動啟動 | 登入 Windows 後自動執行。設定寫在目前使用者的登錄機碼，不需要系統管理員權限 |
+| 滑鼠穿透 | 開啟後橫條不再擋住滑鼠，點擊會落到後面的視窗。此時橫條本身點不到，要關閉請從系統匣圖示操作 |
+| 重設位置 | 回到主螢幕底部正中央 |
+| 關閉 | 結束程式 |
+
+開機自動啟動記的是執行檔當下的路徑。之後如果搬移或更新了執行檔，請重新勾選一次。
 
 ## 顯示內容
 
@@ -42,7 +54,22 @@
 | CPU | 過去一秒的平均使用率。採用效能計數器「Processor Utility」，數字較接近工作管理員；該計數器無法使用時自動改用 `GetSystemTimes` 計算 |
 | RAM | 實體記憶體使用率 |
 
-文字顏色會隨 CPU 使用率由綠轉紅。
+三個項目各自依下列門檻變色：
+
+| 項目 | 綠色 | 黃色 | 紅色 |
+| --- | --- | --- | --- |
+| 電量（未接電源時） | 41% 以上 | 21%–40% | 20% 以下 |
+| CPU | 低於 60% | 60%–84% | 85% 以上 |
+| RAM | 低於 80% | 80%–89% | 90% 以上 |
+
+只要接著電源，電量一律顯示綠色。
+
+## 程式會留下的資料
+
+| 位置 | 內容 |
+| --- | --- |
+| `%AppData%\BatteryCPUMonitor\settings.json` | 橫條位置與滑鼠穿透的開關 |
+| 登錄機碼 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `BatteryCPUMonitor` | 只有勾選「開機自動啟動」時才會寫入，取消勾選即移除 |
 
 ## 從原始碼建置
 
@@ -64,16 +91,19 @@ dotnet publish BatteryCPUMonitor/BatteryCPUMonitor.csproj -c Release -r win-x64 
 
 | 路徑 | 內容 |
 | --- | --- |
-| `BatteryCPUMonitor/BarForm.cs` | 橫條視窗：拖曳、放大、右鍵選單、每秒更新 |
-| `BatteryCPUMonitor/BarText.cs` | 決定顯示的文字與顏色（純計算） |
+| `BatteryCPUMonitor/BarForm.cs` | 橫條視窗：繪製、拖曳、放大、選單、系統匣、每秒更新 |
+| `BatteryCPUMonitor/BarText.cs` | 決定顯示的文字與各段的警示等級（純計算） |
+| `BatteryCPUMonitor/Levels.cs` | 警示等級與門檻（純計算） |
 | `BatteryCPUMonitor/BarPlacement.cs` | 計算橫條擺放位置（純計算） |
+| `BatteryCPUMonitor/AppSettings.cs` | 讀寫自動記住的狀態 |
+| `BatteryCPUMonitor/AutoStart.cs` | 開機自動啟動 |
 | `BatteryCPUMonitor/Metrics/` | 讀取電池、CPU、記憶體 |
 | `BatteryCPUMonitor.Tests/` | 單元測試 |
 | `.github/` | 自動建置與發版流程 |
 
 ## 版本與發版
 
-每次推送到 `master`，GitHub Actions 會自動建置、測試、跳版號並發布 Release，更新內容直接取自提交訊息。版號依提交標題的前綴決定：
+每次推送到 `master`，GitHub Actions 會自動建置、測試、跳版號並發布 Release，更新內容直接取自提交訊息。推送到 `dev/` 開頭的分支只會建置與測試，不會發布，適合在合併前先驗證。版號依提交標題的前綴決定：
 
 | 提交標題 | 版號變化 | 範例 |
 | --- | --- | --- |
@@ -86,7 +116,7 @@ dotnet publish BatteryCPUMonitor/BatteryCPUMonitor.csproj -c Release -r win-x64 
 ## 規劃
 
 - [x] 第一階段：升級 .NET 10、修正更新時畫面卡頓、自動建置與發版
-- [ ] 第二階段：電量／CPU／RAM 各自依門檻變色、記住位置、多螢幕與高 DPI、系統匣圖示、開機自動啟動、滑鼠穿透
+- [x] 第二階段：電量／CPU／RAM 各自依門檻變色、記住位置、多螢幕與高 DPI、系統匣圖示、開機自動啟動、滑鼠穿透
 - [ ] 第三階段：滑鼠移入時顯示電池詳情（健康度、耗電瓦數、預估剩餘或充滿時間）
 
 不打算做的事：溫度、風扇、GPU 監控。這些需要系統管理員權限載入驅動程式，與本專案的定位不合；有這類需求建議使用 [LiteMonitor](https://github.com/Diorser/LiteMonitor)。
