@@ -3,6 +3,7 @@
 
 - 印出通過、失敗的數量，並把通過數量寫到 GITHUB_OUTPUT（passed=N）
 - 每一項失敗的測試輸出成 GitHub Actions 的錯誤註記，在 Actions 頁面與 API 都看得到原因
+- 測試自己印出的訊息輸出成一般註記
 - 有測試失敗，或一項測試都沒執行到，就以非零的結束碼結束
 
 用法：test-summary.py <results.trx>
@@ -26,8 +27,17 @@ def main() -> int:
 
     for result in failed:
         message = result.findtext("t:Output/t:ErrorInfo/t:Message", default="", namespaces=NS)
-        message = " ".join(message.split())[:400]
+        message = " ".join(message.split())[:600]
         print(f"::error title=測試失敗::{result.get('testName')}: {message}")
+
+    # 測試自己印出來的訊息（例如在建置主機上觀察到的實際狀況）整理成一般註記，最多列 8 則。
+    noted = 0
+    for result in results:
+        text = result.findtext("t:Output/t:StdOut", default="", namespaces=NS)
+        text = " ".join(text.split())[:600]
+        if text and noted < 8:
+            noted += 1
+            print(f"::notice title=測試輸出::{result.get('testName')}: {text}")
 
     print(f"通過 {passed} 項，失敗 {len(failed)} 項")
 
