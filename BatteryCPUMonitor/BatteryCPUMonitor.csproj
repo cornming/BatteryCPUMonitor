@@ -15,7 +15,14 @@
 
     <!-- 除錯符號內嵌在執行檔裡，發布時只會有一個 exe -->
     <DebugType>embedded</DebugType>
+
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 同一個圖示也內嵌為資源，供系統匣使用 -->
+    <EmbeddedResource Include="app.ico" LogicalName="app.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="BatteryCPUMonitor.Tests" />
