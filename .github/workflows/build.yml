@@ -59,6 +59,7 @@ jobs:
         env:
           MSYS_NO_PATHCONV: 1
           PYTHONUTF8: 1
+          SCREENSHOT_DIR: ${{ github.workspace }}\screenshots
         run: |
           # 測試失敗時先不中斷，讓下一行把失敗原因整理成錯誤註記。
           dotnet test BatteryCPUMonitor.sln -c Release --no-build \
@@ -66,6 +67,21 @@ jobs:
 
           # 有測試失敗，或一項都沒執行到，這一步就會失敗。
           python .github/scripts/test-summary.py testresults/results.trx
+
+      # dev 分支：把測試時擷取的實際畫面推到 ci-screenshots 分支，合併前可以先看外觀。
+      - name: 上傳畫面截圖
+        if: always() && startsWith(github.ref, 'refs/heads/dev/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls screenshots/*.png >/dev/null 2>&1 || { echo "沒有截圖"; exit 0; }
+          cd screenshots
+          git init -q -b ci-screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- *.png
+          git commit -q -m "CI 截圖：$GITHUB_SHA"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-screenshots
 
       - name: 產生單一執行檔
         run: |
