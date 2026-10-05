@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace BatteryCPUMonitor;
 
 /// <summary>
-/// 程式自動記住的狀態（橫條位置、滑鼠穿透），存在使用者自己的 AppData 資料夾。
+/// 程式自動記住的狀態（橫條位置、滑鼠穿透、顯示項目），存在使用者自己的 AppData 資料夾。
 /// 使用者不需要也不必手動編輯這個檔案。
 /// </summary>
 internal sealed class AppSettings
@@ -21,6 +21,18 @@ internal sealed class AppSettings
     public int? AnchorY { get; set; }
 
     public bool ClickThrough { get; set; }
+
+    // 要顯示的項目，預設全部顯示。舊版的設定檔沒有這些欄位，讀取後維持預設值。
+    public bool ShowBattery { get; set; } = true;
+
+    public bool ShowCpuRam { get; set; } = true;
+
+    public bool ShowDisk { get; set; } = true;
+
+    public bool ShowNetwork { get; set; } = true;
+
+    [JsonIgnore]
+    public VisibleItems Visible => new(ShowBattery, ShowCpuRam, ShowDisk, ShowNetwork);
 
     /// <summary>使用者拖曳後的錨點（橫條底邊中點）；沒拖過為 null。</summary>
     [JsonIgnore]

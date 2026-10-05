@@ -30,9 +30,22 @@ internal static class Thresholds
     public const int BatteryWarn = 40;
     public const int BatteryCritical = 20;
 
+    // 磁碟與網路的顏色不是「警報」，而是讓人一眼看出有東西正在大量讀寫或傳輸。
+    public const double DiskWarnBytesPerSecond = 10 * 1024 * 1024;
+    public const double DiskCriticalBytesPerSecond = 100 * 1024 * 1024;
+
+    public const double NetworkWarnBytesPerSecond = 1 * 1024 * 1024;
+    public const double NetworkCriticalBytesPerSecond = 10 * 1024 * 1024;
+
     public static Level ForCpu(double? percent) => Rising(percent, CpuWarn, CpuCritical);
 
     public static Level ForRam(double? percent) => Rising(percent, RamWarn, RamCritical);
+
+    public static Level ForDiskRate(double? bytesPerSecond) =>
+        Rising(bytesPerSecond, DiskWarnBytesPerSecond, DiskCriticalBytesPerSecond);
+
+    public static Level ForNetworkRate(double? bytesPerSecond) =>
+        Rising(bytesPerSecond, NetworkWarnBytesPerSecond, NetworkCriticalBytesPerSecond);
 
     /// <summary>電量越低越緊急；只要接著電源就視為正常。</summary>
     public static Level ForBattery(BatterySnapshot battery)
@@ -52,8 +65,8 @@ internal static class Thresholds
             : Level.Good;
     }
 
-    private static Level Rising(double? percent, double warn, double critical) =>
-        percent is not double value ? Level.Neutral
+    private static Level Rising(double? reading, double warn, double critical) =>
+        reading is not double value ? Level.Neutral
         : value >= critical ? Level.Critical
         : value >= warn ? Level.Warn
         : Level.Good;
