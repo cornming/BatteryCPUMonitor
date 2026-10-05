@@ -4,6 +4,7 @@
 #
 # 內容取自「上一個版本標籤之後」的提交：標題依類型分組，
 # 提交內文裡以 "- " 開頭的行會列為該項目的子項目。
+# 若有環境變數 TEST_PASSED，會在結尾註明通過的自動測試數量。
 set -euo pipefail
 
 version=${1:?用法：release-notes.sh <版本號>}
@@ -50,6 +51,10 @@ NOTES
 [ -n "$features" ] && printf '\n### 新功能\n\n%s' "$features"
 [ -n "$fixes" ]    && printf '\n### 修正\n\n%s' "$fixes"
 [ -n "$others" ]   && printf '\n### 其他調整\n\n%s' "$others"
+
+if [ -n "${TEST_PASSED:-}" ]; then
+  printf '\n本版通過 %s 項自動測試。\n' "$TEST_PASSED"
+fi
 
 if [ -n "$last" ]; then
   printf '\n完整差異：https://github.com/%s/compare/%s...v%s\n' "${GITHUB_REPOSITORY:-cornming/BatteryCPUMonitor}" "$last" "$version"
