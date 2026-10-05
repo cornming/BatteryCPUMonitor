@@ -40,12 +40,24 @@
 | 項目 | 說明 |
 | --- | --- |
 | 顯示項目 | 勾選要顯示的欄位：電池、電池詳情、CPU 與記憶體、GPU 與顯示記憶體、磁碟讀寫、網路速度。這台電腦沒有的硬體會呈現灰色無法勾選 |
+| 嵌入工作列 | 把內容直接顯示在工作列上、系統匣的左邊，浮動橫條會隱藏。再點一次切回浮動橫條。詳見下方「嵌入工作列」 |
 | 開機自動啟動 | 登入 Windows 後自動執行。設定寫在目前使用者的登錄機碼，不需要系統管理員權限 |
 | 滑鼠穿透 | 開啟後橫條不再擋住滑鼠，點擊會落到後面的視窗。此時橫條本身點不到，要關閉請從系統匣圖示操作 |
-| 重設位置 | 回到主螢幕底部正中央 |
+| 重設位置 | 浮動橫條回到主螢幕底部正中央 |
 | 關閉 | 結束程式 |
 
 開機自動啟動記的是執行檔當下的路徑。之後如果搬移或更新了執行檔，請重新勾選一次。
+
+## 嵌入工作列
+
+勾選選單的「嵌入工作列」後，同樣的內容會直接畫在主螢幕的工作列上，位置在系統匣（時鐘與通知圖示）的左邊，文字顏色會跟著工作列的深淺色切換。
+
+- 支援 Windows 11，以及工作列在螢幕上方或下方的 Windows 10。工作列放在螢幕左右兩側時不支援。
+- Windows 10 上會把「執行中程式的按鈕列」縮短一些來讓出空間，取消勾選或關閉程式時會還原。如果程式被強制結束而來不及還原，按鈕列會在工作列下次重新排版時恢復（例如重新啟動檔案總管）。
+- 背景是透明的，滑鼠點在文字之間的空隙會點到工作列本身。要開啟選單，請在文字上按右鍵，或改用系統匣的電池圖示。
+- 嵌入期間不能拖曳移動。開很多視窗時，Windows 11 的工作列圖示可能會跟它重疊。
+- 檔案總管重新啟動後會自動重新嵌入；暫時嵌不進去時，會先以浮動橫條顯示。
+- 這是把視窗掛進工作列的做法（與 LiteMonitor、TrafficMonitor 相同），不需要系統管理員權限，但不是 Windows 正式公開的功能，未來的 Windows 更新有可能讓它失效。失效時取消勾選即可回到浮動橫條。
 
 ## 顯示內容
 
@@ -86,7 +98,7 @@
 
 | 位置 | 內容 |
 | --- | --- |
-| `%AppData%\BatteryCPUMonitor\settings.json` | 橫條位置、滑鼠穿透的開關、要顯示的項目 |
+| `%AppData%\BatteryCPUMonitor\settings.json` | 橫條位置、滑鼠穿透與嵌入工作列的開關、要顯示的項目 |
 | 登錄機碼 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `BatteryCPUMonitor` | 只有勾選「開機自動啟動」時才會寫入，取消勾選即移除 |
 
 ## 從原始碼建置
@@ -109,7 +121,9 @@ dotnet publish BatteryCPUMonitor/BatteryCPUMonitor.csproj -c Release -r win-x64 
 
 | 路徑 | 內容 |
 | --- | --- |
-| `BatteryCPUMonitor/BarForm.cs` | 橫條視窗：繪製、拖曳、選單、系統匣、每秒更新 |
+| `BatteryCPUMonitor/BarForm.cs` | 浮動橫條與主控：繪製、拖曳、選單、系統匣、每秒更新 |
+| `BatteryCPUMonitor/TaskbarForm.cs` | 嵌入工作列的小工具 |
+| `BatteryCPUMonitor/TaskbarPlacement.cs` | 嵌入工作列時的位置計算（純計算） |
 | `BatteryCPUMonitor/BarContent.cs` | 決定各欄顯示的文字與警示等級（純計算） |
 | `BatteryCPUMonitor/GridLayout.cs` | 兩列格狀版面的排版（純計算） |
 | `BatteryCPUMonitor/Levels.cs` | 警示等級與門檻（純計算） |
@@ -117,7 +131,7 @@ dotnet publish BatteryCPUMonitor/BatteryCPUMonitor.csproj -c Release -r win-x64 
 | `BatteryCPUMonitor/AppSettings.cs` | 讀寫自動記住的狀態 |
 | `BatteryCPUMonitor/AutoStart.cs` | 開機自動啟動 |
 | `BatteryCPUMonitor/Metrics/` | 讀取電池、CPU、記憶體、GPU、磁碟、網路 |
-| `BatteryCPUMonitor.Tests/` | 單元測試；其中 `LiveSystemTests` 會在 Windows 上實際呼叫系統 API |
+| `BatteryCPUMonitor.Tests/` | 單元測試；`LiveSystemTests` 會在 Windows 上實際呼叫系統 API，`WinFormsSmokeTests` 只在 GitHub Actions 上執行，會實際建立視窗並繪製 |
 | `.github/` | 自動建置與發版流程 |
 
 ## 版本與發版
@@ -138,7 +152,7 @@ dotnet publish BatteryCPUMonitor/BatteryCPUMonitor.csproj -c Release -r win-x64 
 - [x] 第二階段：電量／CPU／RAM 各自依門檻變色、記住位置、多螢幕與高 DPI、系統匣圖示、開機自動啟動、滑鼠穿透
 - [x] 第三階段：兩列格狀橫條、磁碟讀寫與網路速度、可勾選顯示項目
 - [x] 第四階段：GPU 使用率與顯示記憶體、電池詳情（功耗、健康度、預估充滿時間）
-- [ ] 工作列顯示模式：把橫條嵌進工作列
+- [x] 第五階段：嵌入工作列
 - [ ] 選用的硬體感測器：CPU 溫度與頻率、風扇、功耗等。這些需要系統管理員權限，會做成預設關閉、勾選後才啟用的功能
 
 平常執行不需要系統管理員權限，這一點不會改變。需要管理員權限的項目只會以選用功能的形式加入。
