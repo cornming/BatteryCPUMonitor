@@ -91,6 +91,37 @@ public class LiveUpdateTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task 試跑真正的程式_版本相符才算通過_改名成update_exe也跑得起來()
+    {
+        if (NotOnCi) { return; }
+
+        // 建置時主程式的 exe 與它的執行設定會一起放進測試的輸出資料夾。
+        string[] files = ["BatteryCPUMonitor.exe", "BatteryCPUMonitor.dll", "BatteryCPUMonitor.runtimeconfig.json", "BatteryCPUMonitor.deps.json"];
+        string missing = string.Join("、", files.Where(f => !File.Exists(Path.Combine(AppContext.BaseDirectory, f))));
+        if (missing.Length > 0)
+        {
+            output.WriteLine($"輸出資料夾裡缺少 {missing}，略過。");
+            return;
+        }
+
+        using var folder = new TempFolder();
+        foreach (string file in files)
+        {
+            File.Copy(Path.Combine(AppContext.BaseDirectory, file), folder.File(file));
+        }
+
+        // 實際更新時，被試跑的是下載下來的 BatteryCPUMonitor.exe.update.exe，所以就用這個名字試。
+        string renamed = UpdateInstaller.DownloadPathFor(folder.File("BatteryCPUMonitor.exe"));
+        File.Copy(folder.File("BatteryCPUMonitor.exe"), renamed);
+
+        Assert.True(await SelfCheckRunner.RunAsync(folder.File("BatteryCPUMonitor.exe"), AppVersion.Current, CancellationToken.None));
+        Assert.True(await SelfCheckRunner.RunAsync(renamed, AppVersion.Current, CancellationToken.None), "改名後的執行檔試跑失敗");
+        Assert.False(await SelfCheckRunner.RunAsync(renamed, new Version(9, 9, 9), CancellationToken.None), "版本不符卻通過了");
+        Assert.False(await SelfCheckRunner.RunAsync(folder.File("no-such.exe"), AppVersion.Current, CancellationToken.None), "不存在的檔案卻通過了");
+        output.WriteLine($"試跑成功，版本 {AppVersion.CurrentText}。");
+    }
+
+    [Fact]
     public async Task 最新版本頁面會轉址到版本標籤_這是API被限流時的備用路線()
     {
         if (NotOnCi) { return; }
