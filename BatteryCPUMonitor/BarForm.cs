@@ -435,13 +435,9 @@ internal sealed class BarForm : Form
 
             if (interactive)
             {
-                string notes = release.Notes.Length > 0 ? $"
-
-{release.Notes}" : string.Empty;
+                string notes = release.Notes.Length > 0 ? "\n\n" + release.Notes : string.Empty;
                 DialogResult answer = MessageBox.Show(
-                    $"發現新版本 v{latest}（目前 v{AppVersion.CurrentText}）。{notes}
-
-要現在下載並安裝嗎？安裝完成後程式會自動重新啟動。",
+                    $"發現新版本 v{latest}（目前 v{AppVersion.CurrentText}）。{notes}\n\n要現在下載並安裝嗎？安裝完成後程式會自動重新啟動。",
                     DialogCaption,
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question);
