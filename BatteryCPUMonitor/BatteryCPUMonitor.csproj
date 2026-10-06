@@ -20,7 +20,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
-  <!-- 免安裝完整版（以 --self-contained true 發布）在執行檔裡留下記號，自動更新時才知道要下載哪一種 -->
+  <!-- 免安裝完整版（發布時指定 self-contained）在執行檔裡留下記號，自動更新時才知道要下載哪一種 -->
   <ItemGroup Condition="'$(SelfContained)' == 'true'">
     <AssemblyMetadata Include="Variant" Value="standalone" />
   </ItemGroup>
