@@ -103,7 +103,7 @@ public class UpdateControllerTests
         Assert.Equal(CheckStatus.Available, check.Status);
         Assert.Equal("2.6.0", AppVersion.Display(check.Release!.Version));
         Assert.Equal(LiteName(), check.Release.Asset!.Name);
-        Assert.Equal([ApiUrl], rig.Http.Requests);
+        Assert.Equal(new[] { ApiUrl }, rig.Http.Requests);
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public class UpdateControllerTests
         UpdateCheck check = await rig.Controller(current: new Version(2, 6, 0)).CheckAsync(CancellationToken.None);
 
         Assert.Equal(CheckStatus.UpToDate, check.Status);
-        Assert.Equal([ApiUrl], rig.Http.Requests);
+        Assert.Equal(new[] { ApiUrl }, rig.Http.Requests);
     }
 
     [Fact]
@@ -219,7 +219,7 @@ public class UpdateControllerTests
         Assert.Equal("2.6.0", AppVersion.Display(check.Release!.Version));
         Assert.Equal(DownloadUrl(LiteName()), check.Release.Asset!.Url.AbsoluteUri);
         Assert.Null(check.Release.Asset.Sha256); // 這條路沒有雜湊值可驗證
-        Assert.Equal([PageUrl], rig.NoRedirect.Requests);
+        Assert.Equal(new[] { PageUrl }, rig.NoRedirect.Requests);
     }
 
     [Fact]
@@ -266,7 +266,7 @@ public class UpdateControllerTests
         Assert.Equal(rig.NewContent, rig.ReadCurrent());
         Assert.Equal(Rig.OldContent, File.ReadAllBytes(rig.OldFile));
         Assert.False(File.Exists(rig.TempDownload));
-        Assert.Equal([rig.CurrentExe], rig.Relaunched);
+        Assert.Equal(new[] { rig.CurrentExe }, rig.Relaunched);
     }
 
     [Fact]
@@ -277,7 +277,7 @@ public class UpdateControllerTests
 
         await rig.Controller().InstallAsync(release, null, CancellationToken.None);
 
-        Assert.Equal(["BatteryCPUMonitor.exe.update.exe|2.6.0"], rig.SelfChecked);
+        Assert.Equal(new[] { "BatteryCPUMonitor.exe.update.exe|2.6.0" }, rig.SelfChecked);
     }
 
     [Fact]

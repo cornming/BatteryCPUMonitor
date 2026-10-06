@@ -52,7 +52,17 @@ jobs:
           echo "下一個版本：$next"
 
       - name: 建置
-        run: dotnet build BatteryCPUMonitor.sln -c Release -p:Version=${{ steps.version.outputs.version }}
+        env:
+          PYTHONUTF8: 1
+        run: |
+          # 建置失敗時，把編譯錯誤整理成註記（哪個檔案、哪一行、什麼錯誤），不必翻完整記錄。
+          dotnet build BatteryCPUMonitor.sln -c Release -p:Version=${{ steps.version.outputs.version }} \
+            -p:GenerateFullPaths=true --tl:off 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            python .github/scripts/build-errors.py build.log
+            exit "$status"
+          fi
 
       - name: 測試
         id: test
