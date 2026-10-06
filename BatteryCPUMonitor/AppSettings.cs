@@ -25,6 +25,12 @@ internal sealed class AppSettings
     /// <summary>嵌入工作列（true）或浮動橫條（false）。</summary>
     public bool TaskbarMode { get; set; }
 
+    /// <summary>
+    /// 嵌入哪個螢幕的工作列（螢幕的裝置名稱）；null 表示主螢幕。
+    /// 指定的螢幕目前沒接上時暫時改用主螢幕，這個設定不會被清掉。
+    /// </summary>
+    public string? TaskbarMonitor { get; set; }
+
     // 要顯示的項目，預設全部顯示。舊版的設定檔沒有這些欄位，讀取後維持預設值。
     public bool ShowBattery { get; set; } = true;
 

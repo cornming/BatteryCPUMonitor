@@ -179,7 +179,14 @@ internal sealed class BarForm : Form
 
         _autoStartItem.Click += (_, _) => AutoStart.SetEnabled(!AutoStart.IsEnabled());
         _clickThroughItem.Click += (_, _) => SetClickThrough(!_settings.ClickThrough);
-        _taskbarModeItem.Click += (_, _) => ToggleTaskbarMode();
+        _taskbarModeItem.Click += (_, _) =>
+        {
+            // 有多個螢幕時這一項是子選單的標題，點它只是展開，不要切換。
+            if (!_taskbarModeItem.HasDropDownItems)
+            {
+                ChangeTaskbarMode(!_settings.TaskbarMode, screen: null);
+            }
+        };
         resetPosition.Click += (_, _) => ResetPosition();
         close.Click += (_, _) => Close();
 
@@ -197,7 +204,7 @@ internal sealed class BarForm : Form
             _showNetworkItem.Checked = _settings.ShowNetwork;
             _autoStartItem.Checked = AutoStart.IsEnabled();
             _clickThroughItem.Checked = _settings.ClickThrough;
-            _taskbarModeItem.Checked = _settings.TaskbarMode;
+            RefreshTaskbarMenu();
             resetPosition.Enabled = !_taskbarActive;
         };
 
@@ -242,40 +249,87 @@ internal sealed class BarForm : Form
         }
     }
 
-    private void ToggleTaskbarMode()
+    /// <summary>
+    /// 每次開啟選單時重建「嵌入工作列」這一項：只有一個螢幕時是單純的勾選項；
+    /// 有多個螢幕時變成子選單，可以選擇嵌入哪個螢幕的工作列，或維持浮動橫條。
+    /// </summary>
+    private void RefreshTaskbarMenu()
     {
-        _settings.TaskbarMode = !_settings.TaskbarMode;
+        foreach (ToolStripItem old in _taskbarModeItem.DropDownItems.Cast<ToolStripItem>().ToList())
+        {
+            old.Dispose();
+        }
+
+        _taskbarModeItem.DropDownItems.Clear();
+
+        IReadOnlyList<ScreenInfo> screens = TaskbarForm.Screens();
+        if (screens.Count < 2)
+        {
+            _taskbarModeItem.Checked = _settings.TaskbarMode;
+            return;
+        }
+
+        _taskbarModeItem.Checked = false;
+
+        var floating = new ToolStripMenuItem("浮動橫條（不嵌入）") { Checked = !_settings.TaskbarMode };
+        floating.Click += (_, _) => ChangeTaskbarMode(embed: false, screen: null);
+        _taskbarModeItem.DropDownItems.Add(floating);
+        _taskbarModeItem.DropDownItems.Add(new ToolStripSeparator());
+
+        foreach (MonitorChoice choice in TaskbarTargets.Choices(screens, TaskbarForm.HasTaskbarOn, _settings.TaskbarMode, _settings.TaskbarMonitor))
+        {
+            var item = new ToolStripMenuItem(choice.Label) { Enabled = choice.Enabled, Checked = choice.Checked };
+            ScreenInfo screen = choice.Screen;
+            item.Click += (_, _) => ChangeTaskbarMode(embed: true, screen);
+            _taskbarModeItem.DropDownItems.Add(item);
+        }
+    }
+
+    /// <summary>切換浮動橫條與嵌入工作列；<paramref name="screen"/> 是要嵌入哪個螢幕，null 表示維持原本選的螢幕。</summary>
+    private void ChangeTaskbarMode(bool embed, ScreenInfo? screen)
+    {
+        _settings.TaskbarMode = embed;
+        if (embed && screen is ScreenInfo chosen)
+        {
+            _settings.TaskbarMonitor = TaskbarTargets.SettingFor(chosen);
+        }
+
         _settings.Save(_settingsPath);
         _taskbarRetryAt = 0;
         ApplyLayout();
 
-        if (_settings.TaskbarMode && !_taskbarActive)
+        if (embed && !_taskbarActive)
         {
             _tray.ShowBalloonTip(
                 5000,
                 "目前無法嵌入工作列",
-                "找不到可用的工作列（工作列在螢幕左右兩側時不支援）。先以浮動橫條顯示，之後會自動再試。",
+                "找不到可用的工作列（工作列在螢幕左右兩側，或所選螢幕沒有顯示工作列時不支援）。先以浮動橫條顯示，之後會自動再試。",
                 ToolTipIcon.Warning);
         }
     }
 
-    /// <summary>確保工作列上的小工具存在而且還掛著；做不到時回傳 false，由浮動橫條頂替。</summary>
+    /// <summary>確保工作列上的小工具存在、還掛著，而且掛在使用者選的那個螢幕上；做不到時回傳 false，由浮動橫條頂替。</summary>
     private bool EnsureTaskbar()
     {
-        if (_taskbar is { IsAttached: true })
+        // 實際要用的螢幕：選的那個螢幕被拔掉時暫時改用主螢幕，接回來之後會自動回去。
+        ScreenInfo target = TaskbarForm.ResolveTarget(_settings.TaskbarMonitor);
+
+        if (_taskbar is { IsAttached: true } attached
+            && string.Equals(attached.TargetDevice, target.DeviceName, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        // Explorer 重新啟動後舊的小工具會失效，丟掉重建。失敗的話隔幾秒再試，不必每秒都試。
+        // Explorer 重新啟動後舊的小工具會失效，選的螢幕改變了也要換地方，兩種情況都丟掉重建。
+        // 失敗的話隔幾秒再試，不必每秒都試。
         ReleaseTaskbar();
-        if (Environment.TickCount64 < _taskbarRetryAt || !TaskbarForm.TaskbarAvailable())
+        if (Environment.TickCount64 < _taskbarRetryAt || !TaskbarForm.HasTaskbarOn(target))
         {
             return false;
         }
 
         var taskbar = new TaskbarForm(ShowMenuAtCursor);
-        if (!taskbar.TryAttach(_settings.ClickThrough))
+        if (!taskbar.TryAttach(_settings.ClickThrough, _settings.TaskbarMonitor))
         {
             taskbar.Dispose();
             _taskbarRetryAt = Environment.TickCount64 + TaskbarRetryMs;

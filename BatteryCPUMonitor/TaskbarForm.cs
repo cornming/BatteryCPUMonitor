@@ -11,6 +11,8 @@ namespace BatteryCPUMonitor;
 /// 這不需要系統管理員權限，但屬於 Windows 沒有正式公開的用法，Windows 10 與 11 的工作列結構也不同：
 /// Windows 11 直接疊在工作列上；Windows 10 要把「工作清單」縮短來讓出空間，離開時再還原。
 /// 背景以「色鍵」挖成透明：把背景塗成一個接近工作列底色的顏色，並告訴 Windows 這個顏色不要畫出來。
+/// 有多個螢幕時，可以選擇掛在哪一個螢幕的工作列上：主螢幕的工作列是 Shell_TrayWnd，
+/// 其他螢幕的是各自獨立的 Shell_SecondaryTrayWnd。
 /// </remarks>
 internal sealed class TaskbarForm : Form
 {
@@ -59,6 +61,7 @@ internal sealed class TaskbarForm : Form
     private readonly Action _showMenu;
     private readonly bool _isWindows11 = Environment.OSVersion.Version.Build >= Windows11FirstBuild;
 
+    private ScreenInfo _target;
     private IntPtr _taskbar;
     private IntPtr _container; // 實際的父視窗：Windows 11 為工作列本身，Windows 10 為 ReBarWindow32
     private IntPtr _taskList;  // 只有 Windows 10 會用到
@@ -95,8 +98,44 @@ internal sealed class TaskbarForm : Form
             true);
     }
 
-    /// <summary>目前找不找得到工作列（Explorer 正在重新啟動時會暫時找不到）。</summary>
-    public static bool TaskbarAvailable() => FindWindowW("Shell_TrayWnd", null) != IntPtr.Zero;
+    /// <summary>目前掛在哪個螢幕（裝置名稱）。還沒掛上時為空字串。</summary>
+    public string TargetDevice => _target.DeviceName ?? string.Empty;
+
+    /// <summary>目前接上的所有螢幕。</summary>
+    public static IReadOnlyList<ScreenInfo> Screens() =>
+        Screen.AllScreens.Select(screen => new ScreenInfo(screen.DeviceName, screen.Bounds, screen.Primary)).ToList();
+
+    /// <summary>依設定值（螢幕的裝置名稱，null 為主螢幕）找出實際要用的螢幕。</summary>
+    public static ScreenInfo ResolveTarget(string? preferredDevice) => TaskbarTargets.Resolve(preferredDevice, Screens());
+
+    /// <summary>
+    /// 找出指定螢幕上的工作列視窗；這個螢幕沒有工作列（例如 Windows 設定裡沒有開啟「在所有顯示器上顯示工作列」），
+    /// 或 Explorer 正在重新啟動時，回傳 <see cref="IntPtr.Zero"/>。
+    /// </summary>
+    public static IntPtr FindTaskbarOn(ScreenInfo screen)
+    {
+        if (screen.IsPrimary)
+        {
+            return FindWindowW("Shell_TrayWnd", null);
+        }
+
+        var handles = new List<IntPtr>();
+        var rectangles = new List<Rectangle>();
+        IntPtr window = IntPtr.Zero;
+        while ((window = FindWindowExW(IntPtr.Zero, window, "Shell_SecondaryTrayWnd", null)) != IntPtr.Zero)
+        {
+            if (TryGetRect(window, out Rectangle rectangle))
+            {
+                handles.Add(window);
+                rectangles.Add(rectangle);
+            }
+        }
+
+        return TaskbarTargets.IndexOfTaskbarOn(screen.Bounds, rectangles) is int index ? handles[index] : IntPtr.Zero;
+    }
+
+    /// <summary>指定的螢幕上有沒有工作列可以掛。</summary>
+    public static bool HasTaskbarOn(ScreenInfo screen) => FindTaskbarOn(screen) != IntPtr.Zero;
 
     /// <summary>小工具是否還好好地掛在工作列上。Explorer 重新啟動後會變成 false，需要重新建立。</summary>
     public bool IsAttached =>
@@ -119,10 +158,15 @@ internal sealed class TaskbarForm : Form
         }
     }
 
-    /// <summary>把小工具掛到工作列上。找不到工作列，或工作列是直式的，回傳 false。</summary>
-    public bool TryAttach(bool clickThrough)
+    /// <summary>
+    /// 把小工具掛到工作列上。找不到工作列，或工作列是直式的，回傳 false。
+    /// </summary>
+    /// <param name="clickThrough">是否讓滑鼠穿透。</param>
+    /// <param name="targetDevice">要掛在哪個螢幕的工作列（裝置名稱）；null 為主螢幕，指定的螢幕沒接上時也改用主螢幕。</param>
+    public bool TryAttach(bool clickThrough, string? targetDevice = null)
     {
-        _taskbar = FindWindowW("Shell_TrayWnd", null);
+        _target = ResolveTarget(targetDevice);
+        _taskbar = FindTaskbarOn(_target);
         if (_taskbar == IntPtr.Zero)
         {
             return false;
@@ -131,9 +175,23 @@ internal sealed class TaskbarForm : Form
         IntPtr container = _taskbar;
         if (!_isWindows11)
         {
-            // Windows 10 的結構：Shell_TrayWnd → ReBarWindow32 → MSTaskSwWClass（工作清單）
+            // Windows 10 的結構：Shell_TrayWnd → ReBarWindow32 → MSTaskSwWClass（工作清單）。
+            // 副螢幕的工作列內部名稱不太一樣，容器可能叫 WorkerW、工作清單可能叫 MSTaskListWClass。
             container = FindWindowExW(_taskbar, IntPtr.Zero, "ReBarWindow32", null);
-            _taskList = container == IntPtr.Zero ? IntPtr.Zero : FindWindowExW(container, IntPtr.Zero, "MSTaskSwWClass", null);
+            if (container == IntPtr.Zero)
+            {
+                container = FindWindowExW(_taskbar, IntPtr.Zero, "WorkerW", null);
+            }
+
+            if (container != IntPtr.Zero)
+            {
+                _taskList = FindWindowExW(container, IntPtr.Zero, "MSTaskSwWClass", null);
+                if (_taskList == IntPtr.Zero)
+                {
+                    _taskList = FindWindowExW(container, IntPtr.Zero, "MSTaskListWClass", null);
+                }
+            }
+
             if (container == IntPtr.Zero || _taskList == IntPtr.Zero)
             {
                 return false;
@@ -186,14 +244,16 @@ internal sealed class TaskbarForm : Form
         Rectangle target;
         if (_isWindows11)
         {
+            // 副螢幕的工作列不一定有系統匣，只有時鐘；找不到時改保留一段寬度避開時鐘。
+            // 「小工具」（天氣）按鈕只出現在主螢幕。
             TryGetRect(FindWindowExW(_taskbar, IntPtr.Zero, "TrayNotifyWnd", null), out Rectangle tray);
             target = TaskbarPlacement.Windows11(
                 container,
                 tray,
                 _layout.Size.Width,
                 gap: Scale(6, dpi),
-                extraAvoid: WidgetsButtonWidth(dpi),
-                fallbackTrayWidth: Scale(200, dpi));
+                extraAvoid: _target.IsPrimary ? WidgetsButtonWidth(dpi) : 0,
+                fallbackTrayWidth: Scale(_target.IsPrimary ? 200 : 130, dpi));
         }
         else
         {
