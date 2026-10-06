@@ -146,6 +146,41 @@ jobs:
             if ($text -notmatch "(?m)^variant=$($case.Variant)\r?$") { throw "$($case.File) 的種類不是 $($case.Variant)" }
           }
 
+      # 使用者實際執行的是發布出來的單一執行檔，跟測試時散開的檔案不一樣：
+      # 這裡對兩個執行檔都真的啟動一次感測器服務（含 LibreHardwareMonitor），確認打包之後也能運作。
+      - name: 感測器服務檢查（實際執行發布出來的執行檔）
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+
+          foreach ($name in @("BatteryCPUMonitor-v$v.exe", "BatteryCPUMonitor-v$v-standalone.exe")) {
+            $file = (Resolve-Path "dist/$name").Path
+            $pipe = "BatteryCPUMonitor.Sensors.ci" + [guid]::NewGuid().ToString("N")
+
+            $process = Start-Process -FilePath $file -ArgumentList "--sensor-host", "--pipe", $pipe, "--sid", $sid, "--parent", $PID -PassThru -WindowStyle Hidden
+            $client = New-Object System.IO.Pipes.NamedPipeClientStream(".", $pipe, [System.IO.Pipes.PipeDirection]::In)
+            try {
+              try { $client.Connect(120000) } catch { throw "$name：連不上感測器服務的管道（$($_.Exception.Message)）" }
+
+              $reader = New-Object System.IO.StreamReader($client)
+              $read = $reader.ReadLineAsync()
+              if (-not $read.Wait(120000)) { throw "$name：感測器服務一直沒有送出數值" }
+              $message = $read.Result | ConvertFrom-Json
+
+              Write-Host "$name：ok=$($message.ok)，硬體=$($message.hw -join '；')，感測器 $($message.readings.Count) 筆"
+              if (-not $message.ok) { throw "$name：感測器服務初始化失敗：$($message.error)" }
+            }
+            finally {
+              $client.Dispose()
+              if (-not $process.WaitForExit(30000)) {
+                $process.Kill()
+                throw "$name：斷線後感測器服務沒有自己結束"
+              }
+            }
+            if ($process.ExitCode -ne 0) { throw "$name：感測器服務的結束碼是 $($process.ExitCode)" }
+          }
+
       - uses: actions/upload-artifact@v7
         with:
           name: BatteryCPUMonitor-v${{ steps.version.outputs.version }}

@@ -178,7 +178,8 @@ internal static class SensorSelector
         return reading.Kind switch
         {
             "Temperature" => reading.Value is >= MinTemperature and <= MaxTemperature,
-            "Power" => reading.Value is >= 0 and <= MaxPowerWatts,
+            // 功耗不可能剛好是 0：沒有安裝驅動程式（PawnIO）時，函式庫對讀不到的感測器回報的是 0，不是「沒有」。
+            "Power" => reading.Value is > 0 and <= MaxPowerWatts,
             "Clock" => reading.Value is > 0 and <= 20000,
             "Fan" => reading.Value is >= 0 and <= MaxRpm,
             _ => false,

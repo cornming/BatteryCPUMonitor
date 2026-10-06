@@ -167,6 +167,23 @@ public class SensorSelectorTests
     }
 
     [Fact]
+    public void 功耗為零視為沒有讀到_沒裝驅動程式時函式庫回報的是零()
+    {
+        SensorValues values = SensorSelector.Select([Power("Cpu", "CPU Package", 0), Power("GpuNvidia", "GPU Package", 0)]);
+
+        Assert.Null(values.CpuPowerWatts);
+        Assert.Null(values.GpuPowerWatts);
+    }
+
+    [Fact]
+    public void 零功耗的感測器不會擋住有數值的備選()
+    {
+        SensorValues values = SensorSelector.Select([Power("Cpu", "CPU Package", 0), Power("Cpu", "CPU Cores", 18)]);
+
+        Assert.Equal(18.0, values.CpuPowerWatts);
+    }
+
+    [Fact]
     public void 不認得的種類會被忽略()
     {
         SensorValues values = SensorSelector.Select([new SensorReading("Cpu", "Voltage", "Core", 1.1)]);

@@ -140,9 +140,9 @@ public class WinFormsSmokeTests(ITestOutputHelper output)
             output.WriteLine("選單：" + string.Join("｜", items.Select(i => i.Text)));
             menu.Close();
 
-            Assert.Contains(items, i => i.Text.StartsWith("狀態：未啟用", StringComparison.Ordinal));
-            Assert.Contains(items, i => i.Text.Contains("PawnIO", StringComparison.Ordinal));
-            Assert.Contains(items, i => i.Text.StartsWith("啟用硬體感測器", StringComparison.Ordinal));
+            Assert.Contains(items, i => i.Text is { } t && t.StartsWith("狀態：未啟用", StringComparison.Ordinal));
+            Assert.Contains(items, i => i.Text is { } t && t.Contains("PawnIO", StringComparison.Ordinal));
+            Assert.Contains(items, i => i.Text is { } t && t.StartsWith("啟用硬體感測器", StringComparison.Ordinal));
         });
     }
 
