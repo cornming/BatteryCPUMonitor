@@ -56,9 +56,12 @@ jobs:
           PYTHONUTF8: 1
         run: |
           # 建置失敗時，把編譯錯誤整理成註記（哪個檔案、哪一行、什麼錯誤），不必翻完整記錄。
+          # （GitHub Actions 的 bash 預設一出錯就結束，這裡先關掉，才有機會在失敗後整理錯誤。）
+          set +e
           dotnet build BatteryCPUMonitor.sln -c Release -p:Version=${{ steps.version.outputs.version }} \
             -p:GenerateFullPaths=true --tl:off 2>&1 | tee build.log
           status=${PIPESTATUS[0]}
+          set -e
           if [ "$status" -ne 0 ]; then
             python .github/scripts/build-errors.py build.log
             exit "$status"
