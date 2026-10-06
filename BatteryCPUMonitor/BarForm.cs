@@ -1,6 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using BatteryCPUMonitor.Metrics;
+using BatteryCPUMonitor.Updates;
 
 namespace BatteryCPUMonitor;
 
@@ -20,6 +21,11 @@ internal sealed class BarForm : Form
     private const int MaxTrayTextLength = 63;
     private const int CornerRadiusAt96Dpi = 7;
     private const int TaskbarRetryMs = 5000;
+
+    // 啟動後稍等一下再檢查更新，不要跟開機時一堆程式搶資源；之後每 12 小時檢查一次。
+    private const int FirstUpdateCheckMs = 15_000;
+    private const int UpdateIntervalMs = 12 * 60 * 60 * 1000;
+    private const string DialogCaption = "BatteryCPUMonitor";
 
     // 兩者都小於 1，視窗才會一直維持「分層視窗」樣式；滑鼠穿透需要它，切換時也不會閃爍。
     private const double RestingOpacity = 0.8;
@@ -44,6 +50,8 @@ internal sealed class BarForm : Form
     private readonly ToolStripMenuItem _autoStartItem = new("開機自動啟動");
     private readonly ToolStripMenuItem _clickThroughItem = new("滑鼠穿透");
     private readonly ToolStripMenuItem _taskbarModeItem = new("嵌入工作列");
+    private readonly ToolStripMenuItem _checkUpdateItem = new("檢查更新…");
+    private readonly ToolStripMenuItem _autoUpdateItem = new("自動更新");
     private readonly ToolStripMenuItem _showBatteryItem = new("電池");
     private readonly ToolStripMenuItem _showBatteryDetailItem = new("電池詳情（功耗、健康度）");
     private readonly ToolStripMenuItem _showCpuRamItem = new("CPU 與記憶體");
@@ -53,6 +61,7 @@ internal sealed class BarForm : Form
     private readonly NotifyIcon _tray = new();
     private readonly Icon _icon = LoadIcon();
     private readonly System.Windows.Forms.Timer _timer = new();
+    private readonly System.Windows.Forms.Timer _updateTimer = new();
     private readonly MetricsCollector _collector = new();
 
     private Font _font;
@@ -61,6 +70,9 @@ internal sealed class BarForm : Form
     private MetricsSnapshot _snapshot = MetricsSnapshot.Empty;
     private GridResult _layout = new(Size.Empty, []);
     private bool _sampling;
+
+    private UpdateController? _updater;
+    private bool _updating;
 
     // 嵌入工作列用的小工具；只有在「嵌入工作列」開啟而且成功掛上時才存在。
     private TaskbarForm? _taskbar;
@@ -75,7 +87,8 @@ internal sealed class BarForm : Form
     private Point _dragStartCursor;
     private Point _dragStartAnchor;
 
-    public BarForm()
+    /// <param name="afterUpdate">這個程式是剛更新完、由舊版本啟動的；會顯示「已更新」的提示。</param>
+    public BarForm(bool afterUpdate = false)
     {
         Text = "BatteryCPUMonitor";
         AutoScaleMode = AutoScaleMode.None;
@@ -113,6 +126,22 @@ internal sealed class BarForm : Form
 
         _tray.Visible = true;
 
+        if (afterUpdate)
+        {
+            _tray.ShowBalloonTip(5000, "已更新", $"BatteryCPUMonitor 已更新到 v{AppVersion.CurrentText}。", ToolTipIcon.Info);
+        }
+
+        _updateTimer.Interval = FirstUpdateCheckMs;
+        _updateTimer.Tick += (_, _) =>
+        {
+            _updateTimer.Interval = UpdateIntervalMs;
+            if (_settings.AutoUpdate)
+            {
+                _ = RunUpdateAsync(interactive: false);
+            }
+        };
+        _updateTimer.Start();
+
         // 電池狀態可以立即讀到，先填上；其餘數值以「--」佔位，約 0.3 秒後補上。
         _snapshot = MetricsSnapshot.Empty with { Battery = BatteryReader.Read() };
         ApplyLayout();
@@ -143,6 +172,7 @@ internal sealed class BarForm : Form
         if (disposing)
         {
             _timer.Dispose();
+            _updateTimer.Dispose();
             ReleaseTaskbar(); // Windows 10 會在這裡把工作清單還原
             _collector.Dispose();
             _tray.Visible = false;
@@ -188,6 +218,12 @@ internal sealed class BarForm : Form
             }
         };
         resetPosition.Click += (_, _) => ResetPosition();
+        _checkUpdateItem.Click += (_, _) => _ = RunUpdateAsync(interactive: true);
+        _autoUpdateItem.Click += (_, _) =>
+        {
+            _settings.AutoUpdate = !_settings.AutoUpdate;
+            _settings.Save(_settingsPath);
+        };
         close.Click += (_, _) => Close();
 
         // 每次開啟選單時才讀取實際狀態，勾選永遠反映現況。
@@ -206,6 +242,12 @@ internal sealed class BarForm : Form
             _clickThroughItem.Checked = _settings.ClickThrough;
             RefreshTaskbarMenu();
             resetPosition.Enabled = !_taskbarActive;
+
+            // 開發版，或不是用下載來的 exe 執行（例如用 dotnet 執行）時，不支援自動更新。
+            bool canUpdate = UpdatePolicy.CanSelfUpdate(Environment.ProcessPath) && !UpdatePolicy.IsDevelopment(AppVersion.Current);
+            _checkUpdateItem.Enabled = canUpdate && !_updating;
+            _autoUpdateItem.Enabled = canUpdate;
+            _autoUpdateItem.Checked = _settings.AutoUpdate;
         };
 
         _menu.Items.Add(new ToolStripMenuItem($"BatteryCPUMonitor v{Application.ProductVersion}") { Enabled = false });
@@ -216,6 +258,9 @@ internal sealed class BarForm : Form
         _menu.Items.Add(_autoStartItem);
         _menu.Items.Add(_clickThroughItem);
         _menu.Items.Add(resetPosition);
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(_checkUpdateItem);
+        _menu.Items.Add(_autoUpdateItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(close);
     }
@@ -344,6 +389,101 @@ internal sealed class BarForm : Form
     {
         _taskbar?.Dispose();
         _taskbar = null;
+    }
+
+    // ---- 更新 ----
+
+    private UpdateController Updater => _updater ??= new UpdateController(
+        UpdateHttp.Client,
+        UpdateHttp.NoRedirectClient,
+        Environment.ProcessPath ?? string.Empty,
+        AppVersion.Current,
+        AppVariantInfo.Current,
+        SelfCheckRunner.RunAsync,
+        UpdateRelauncher.Relaunch);
+
+    /// <summary>
+    /// 檢查更新，有新版本就下載、安裝，並重新啟動。
+    /// 手動檢查（<paramref name="interactive"/>）會顯示結果並在安裝前徵求同意；自動檢查只在真的要更新時用通知告知，其餘靜悄悄。
+    /// </summary>
+    private async Task RunUpdateAsync(bool interactive)
+    {
+        if (_updating || IsDisposed)
+        {
+            return;
+        }
+
+        _updating = true;
+        try
+        {
+            UpdateCheck check = await Updater.CheckAsync(CancellationToken.None);
+            if (check.Status != CheckStatus.Available)
+            {
+                if (interactive)
+                {
+                    string message = check.Status == CheckStatus.UpToDate
+                        ? $"目前的 v{AppVersion.CurrentText} 已經是最新版本。"
+                        : check.Message;
+                    MessageBox.Show(message, DialogCaption, MessageBoxButtons.OK, check.Status == CheckStatus.Failed ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+                }
+
+                return;
+            }
+
+            LatestRelease release = check.Release!;
+            string latest = AppVersion.Display(release.Version);
+
+            if (interactive)
+            {
+                string notes = release.Notes.Length > 0 ? $"
+
+{release.Notes}" : string.Empty;
+                DialogResult answer = MessageBox.Show(
+                    $"發現新版本 v{latest}（目前 v{AppVersion.CurrentText}）。{notes}
+
+要現在下載並安裝嗎？安裝完成後程式會自動重新啟動。",
+                    DialogCaption,
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (answer != DialogResult.Yes)
+                {
+                    return;
+                }
+            }
+
+            _tray.ShowBalloonTip(4000, "正在更新", $"正在下載並安裝 v{latest}，完成後會自動重新啟動。", ToolTipIcon.Info);
+            InstallResult result = await Updater.InstallAsync(release, progress: null, CancellationToken.None);
+
+            if (result.Status == InstallStatus.Installed && result.Restarted)
+            {
+                Close(); // 新版本已經啟動，會等這個程式結束後接手
+                return;
+            }
+
+            string text = result.Status == InstallStatus.Installed
+                ? $"已更新到 v{latest}，但無法自動重新啟動，請手動重新開啟程式。"
+                : $"更新失敗：{result.Message}";
+            if (interactive)
+            {
+                MessageBox.Show(text, DialogCaption, MessageBoxButtons.OK, result.Status == InstallStatus.Installed ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            }
+            else
+            {
+                _tray.ShowBalloonTip(8000, "自動更新沒有成功", text, ToolTipIcon.Warning);
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // 更新是附加功能，無論哪裡出了意料之外的狀況，都不能讓監控程式本身跟著當掉。
+            if (interactive)
+            {
+                MessageBox.Show($"檢查更新時發生未預期的錯誤：{ex.Message}", DialogCaption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+        finally
+        {
+            _updating = false;
+        }
     }
 
     /// <summary>在工作列的小工具上按右鍵時顯示選單。</summary>

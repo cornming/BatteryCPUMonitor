@@ -25,6 +25,9 @@ internal sealed class AppSettings
     /// <summary>嵌入工作列（true）或浮動橫條（false）。</summary>
     public bool TaskbarMode { get; set; }
 
+    /// <summary>自動檢查更新，有新版本時自動下載並安裝（預設開啟）。</summary>
+    public bool AutoUpdate { get; set; } = true;
+
     /// <summary>
     /// 嵌入哪個螢幕的工作列（螢幕的裝置名稱）；null 表示主螢幕。
     /// 指定的螢幕目前沒接上時暫時改用主螢幕，這個設定不會被清掉。
