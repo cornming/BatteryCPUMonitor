@@ -121,6 +121,46 @@ public class WinFormsSmokeTests(ITestOutputHelper output)
         Assert.True(screens.All(s => !string.IsNullOrEmpty(s.DeviceName)));
     }
 
+    [Fact]
+    public void 選單可以打開_硬體感測器的狀態文字正常()
+    {
+        if (NotOnCi) { return; }
+
+        RunOnStaThread(() =>
+        {
+            using var form = new BarForm();
+            form.Show();
+            PumpMessages(TimeSpan.FromSeconds(1));
+
+            ContextMenuStrip menu = form.ContextMenuStrip!;
+            menu.Show(new Point(200, 200)); // 打開選單時會依目前狀態更新每一項的文字與勾選
+            PumpMessages(TimeSpan.FromMilliseconds(500));
+
+            List<ToolStripItem> items = Flatten(menu.Items).ToList();
+            output.WriteLine("選單：" + string.Join("｜", items.Select(i => i.Text)));
+            menu.Close();
+
+            Assert.Contains(items, i => i.Text.StartsWith("狀態：未啟用", StringComparison.Ordinal));
+            Assert.Contains(items, i => i.Text.Contains("PawnIO", StringComparison.Ordinal));
+            Assert.Contains(items, i => i.Text.StartsWith("啟用硬體感測器", StringComparison.Ordinal));
+        });
+    }
+
+    private static IEnumerable<ToolStripItem> Flatten(ToolStripItemCollection items)
+    {
+        foreach (ToolStripItem item in items)
+        {
+            yield return item;
+            if (item is ToolStripMenuItem { HasDropDownItems: true } menuItem)
+            {
+                foreach (ToolStripItem child in Flatten(menuItem.DropDownItems))
+                {
+                    yield return child;
+                }
+            }
+        }
+    }
+
     /// <summary>處理視窗訊息一段時間，讓計時器、背景讀取的結果與繪製都有機會執行。</summary>
     private static void PumpMessages(TimeSpan duration)
     {

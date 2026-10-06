@@ -52,6 +52,9 @@ public class LiveSystemTests
         Assert.True(m.DiskWriteBytesPerSecond is >= 0, $"寫入 = {m.DiskWriteBytesPerSecond}");
         Assert.True(m.Network is { UploadBytesPerSecond: >= 0, DownloadBytesPerSecond: >= 0 }, $"網路 = {m.Network}");
 
+        // CPU 頻率：虛擬機器不一定提供；有數值的話必須在合理範圍內。
+        Assert.True(m.CpuClockMHz is null or (> 0 and < 20000), $"CPU 頻率 = {m.CpuClockMHz}");
+
         // 建置主機不一定有 GPU；有數值的話必須在合理範圍內。
         Assert.True(m.GpuPercent is null or (>= 0 and <= 100), $"GPU = {m.GpuPercent}");
         Assert.True(m.GpuMemoryBytes is null or >= 0, $"顯存 = {m.GpuMemoryBytes}");

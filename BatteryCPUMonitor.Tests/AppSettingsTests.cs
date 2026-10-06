@@ -63,7 +63,7 @@ public class AppSettingsTests : IDisposable
     [Fact]
     public void 顯示項目預設全部開啟()
     {
-        Assert.Equal(VisibleItems.All, AppSettings.Load(SettingsPath).Visible);
+        Assert.Equal(VisibleItems.Default, AppSettings.Load(SettingsPath).Visible);
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public class AppSettingsTests : IDisposable
         AppSettings settings = AppSettings.Load(SettingsPath);
 
         Assert.Equal(new Point(100, 200), settings.Anchor);
-        Assert.Equal(VisibleItems.All, settings.Visible);
+        Assert.Equal(VisibleItems.Default, settings.Visible);
     }
 
     [Fact]
@@ -115,6 +115,32 @@ public class AppSettingsTests : IDisposable
 
         Assert.True(loaded.TaskbarMode);
         Assert.Null(loaded.TaskbarMonitor);
+    }
+
+    [Fact]
+    public void 感測器相關的項目預設全部關閉_舊的項目維持開啟()
+    {
+        VisibleItems visible = AppSettings.Load(SettingsPath).Visible;
+
+        Assert.False(visible.Temperature);
+        Assert.False(visible.Clock);
+        Assert.False(visible.Power);
+        Assert.False(visible.Fans);
+        Assert.True(visible.Battery && visible.CpuRam && visible.Gpu && visible.Disk && visible.Network);
+        Assert.False(AppSettings.Load(SettingsPath).SensorsEnabled);
+    }
+
+    [Fact]
+    public void 感測器的設定存檔後再讀取仍保留()
+    {
+        new AppSettings { SensorsEnabled = true, ShowTemperature = true, ShowFans = true }.Save(SettingsPath);
+
+        AppSettings loaded = AppSettings.Load(SettingsPath);
+
+        Assert.True(loaded.SensorsEnabled);
+        Assert.True(loaded.Visible.Temperature);
+        Assert.True(loaded.Visible.Fans);
+        Assert.False(loaded.Visible.Power);
     }
 
     [Fact]

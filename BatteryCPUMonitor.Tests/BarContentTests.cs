@@ -1,4 +1,5 @@
 using BatteryCPUMonitor.Metrics;
+using BatteryCPUMonitor.Sensors;
 using Xunit;
 
 namespace BatteryCPUMonitor.Tests;
@@ -240,6 +241,143 @@ public class BarContentTests
     public void 沒有瓦數時以兩個減號代替()
     {
         Assert.Equal("--", BarContent.Watts(null));
+    }
+
+    // ---- 硬體感測器的欄位 ----
+
+    private static SensorValues Values(
+        double? cpuTemp = null, double? gpuTemp = null, double? cpuPower = null, double? gpuPower = null, double? gpuClock = null, params FanReading[] fans) =>
+        new(cpuTemp, gpuTemp, cpuPower, gpuPower, gpuClock, fans);
+
+    private static readonly VisibleItems OnlySensors = new(
+        Battery: false, BatteryDetail: false, CpuRam: false, Gpu: false, Disk: false, Network: false,
+        Temperature: true, Clock: true, Power: true, Fans: true);
+
+    [Fact]
+    public void 溫度欄_顯示CPU與GPU溫度_並依門檻變色()
+    {
+        var snapshot = Snapshot(NoBattery) with { Sensors = Values(cpuTemp: 72, gpuTemp: 90) };
+
+        var columns = BarContent.Build(snapshot, OnlySensors);
+
+        BarColumn column = Assert.Single(columns);
+        Assert.Equal(new BarCell("CPU溫", "72°C", Level.Warn), column.Top);
+        Assert.Equal(new BarCell("GPU溫", "90°C", Level.Critical), column.Bottom);
+    }
+
+    [Fact]
+    public void 溫度欄_只讀得到一項時_另一項以兩個減號佔位()
+    {
+        var snapshot = Snapshot(NoBattery) with { Sensors = Values(gpuTemp: 55) };
+
+        BarColumn column = Assert.Single(BarContent.Build(snapshot, OnlySensors));
+
+        Assert.Equal(new BarCell("CPU溫", "--", Level.Neutral), column.Top);
+        Assert.Equal(new BarCell("GPU溫", "55°C", Level.Good), column.Bottom);
+    }
+
+    [Fact]
+    public void 沒有感測器數值_不會出現感測器欄位()
+    {
+        var snapshot = Snapshot(NoBattery); // 沒有啟用硬體感測器
+
+        var columns = BarContent.Build(snapshot, OnlySensors);
+
+        // 什麼欄位都沒有時退回顯示 CPU 與記憶體，不會是一條空的橫條。
+        Assert.Equal("CPU", Assert.Single(columns).Top.Label);
+    }
+
+    [Fact]
+    public void 感測器欄位預設關閉_即使有數值也不顯示()
+    {
+        var snapshot = Snapshot(NoBattery) with
+        {
+            CpuClockMHz = 3400,
+            Sensors = Values(cpuTemp: 60, gpuTemp: 50, cpuPower: 30, gpuPower: 80, gpuClock: 1500, new FanReading("CPU風扇", 1200)),
+        };
+
+        var labels = BarContent.Build(snapshot, VisibleItems.Default).Select(c => c.Top.Label).ToList();
+
+        Assert.Equal(new[] { "CPU", "讀取", "上傳" }, labels);
+    }
+
+    [Fact]
+    public void 頻率欄_CPU頻率不需要感測器_GPU頻率來自感測器()
+    {
+        var withoutSensors = Snapshot(NoBattery) with { CpuClockMHz = 3412 };
+        var withSensors = withoutSensors with { Sensors = Values(gpuClock: 1850) };
+
+        BarColumn alone = Assert.Single(BarContent.Build(withoutSensors, OnlySensors));
+        BarColumn both = Assert.Single(BarContent.Build(withSensors, OnlySensors));
+
+        Assert.Equal(new BarCell("CPU頻", "3.4GHz", Level.Good), alone.Top);
+        Assert.Equal(new BarCell("GPU頻", "--", Level.Neutral), alone.Bottom);
+        Assert.Equal(new BarCell("GPU頻", "1.9GHz", Level.Good), both.Bottom);
+    }
+
+    [Fact]
+    public void 功耗欄_顯示CPU與GPU功耗()
+    {
+        var snapshot = Snapshot(NoBattery) with { Sensors = Values(cpuPower: 45.24, gpuPower: 120.4) };
+
+        BarColumn column = Assert.Single(BarContent.Build(snapshot, OnlySensors));
+
+        Assert.Equal(new BarCell("CPU功耗", "45.2W", Level.Good), column.Top);
+        Assert.Equal(new BarCell("GPU功耗", "120W", Level.Good), column.Bottom);
+    }
+
+    [Fact]
+    public void 風扇欄_兩個風扇()
+    {
+        var snapshot = Snapshot(NoBattery) with { Sensors = Values(fans: [new FanReading("CPU風扇", 1204), new FanReading("風扇2", 880)]) };
+
+        BarColumn column = Assert.Single(BarContent.Build(snapshot, OnlySensors));
+
+        Assert.Equal(new BarCell("CPU風扇", "1204rpm", Level.Good), column.Top);
+        Assert.Equal(new BarCell("風扇2", "880rpm", Level.Good), column.Bottom);
+    }
+
+    [Fact]
+    public void 風扇欄_只有一個風扇時下格留白()
+    {
+        var snapshot = Snapshot(NoBattery) with { Sensors = Values(fans: [new FanReading("風扇1", 900)]) };
+
+        BarColumn column = Assert.Single(BarContent.Build(snapshot, OnlySensors));
+
+        Assert.Equal("風扇1", column.Top.Label);
+        Assert.Equal(new BarCell(string.Empty, string.Empty, Level.Neutral), column.Bottom);
+    }
+
+    [Fact]
+    public void 各欄的順序_感測器欄位接在GPU之後_磁碟與網路之前()
+    {
+        var snapshot = Snapshot(NoBattery) with
+        {
+            CpuClockMHz = 3400,
+            GpuPercent = 20,
+            GpuMemoryBytes = 1.0 * 1024 * MB,
+            Sensors = Values(cpuTemp: 60, cpuPower: 30, fans: [new FanReading("CPU風扇", 1200)]),
+        };
+
+        var labels = BarContent.Build(snapshot, VisibleItems.All).Select(c => c.Top.Label).ToList();
+
+        Assert.Equal(new[] { "CPU", "GPU", "CPU溫", "CPU頻", "CPU功耗", "CPU風扇", "讀取", "上傳" }, labels);
+    }
+
+    [Fact]
+    public void 感測器欄位的範本寬度足夠容納最長的數值()
+    {
+        var snapshot = Snapshot(NoBattery) with
+        {
+            CpuClockMHz = 4999,
+            Sensors = Values(cpuTemp: 99, gpuTemp: 149, cpuPower: 99.94, gpuPower: 99.94, gpuClock: 4999, fans: [new FanReading("CPU風扇", 9999)]),
+        };
+
+        foreach (BarColumn column in BarContent.Build(snapshot, OnlySensors))
+        {
+            Assert.True(column.Top.Value.Length <= column.ValueTemplate.Length + 1, $"{column.Top.Label} {column.Top.Value} / {column.ValueTemplate}");
+            Assert.True(column.Bottom.Value.Length <= column.ValueTemplate.Length + 1, $"{column.Bottom.Label} {column.Bottom.Value} / {column.ValueTemplate}");
+        }
     }
 
     [Fact]

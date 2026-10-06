@@ -70,9 +70,31 @@ public class ThresholdsTests
         Assert.Equal(expected, Thresholds.ForBatteryHealth(percent));
     }
 
+    [Theory]
+    [InlineData(69.9, Level.Good)]
+    [InlineData(70.0, Level.Warn)]
+    [InlineData(84.9, Level.Warn)]
+    [InlineData(85.0, Level.Critical)]
+    public void CPU溫度門檻_七十轉黃_八十五轉紅(double celsius, Level expected)
+    {
+        Assert.Equal(expected, Thresholds.ForCpuTemperature(celsius));
+    }
+
+    [Theory]
+    [InlineData(74.9, Level.Good)]
+    [InlineData(75.0, Level.Warn)]
+    [InlineData(87.9, Level.Warn)]
+    [InlineData(88.0, Level.Critical)]
+    public void GPU溫度門檻_七十五轉黃_八十八轉紅(double celsius, Level expected)
+    {
+        Assert.Equal(expected, Thresholds.ForGpuTemperature(celsius));
+    }
+
     [Fact]
     public void 沒有數值時不帶警示等級()
     {
+        Assert.Equal(Level.Neutral, Thresholds.ForCpuTemperature(null));
+        Assert.Equal(Level.Neutral, Thresholds.ForGpuTemperature(null));
         Assert.Equal(Level.Neutral, Thresholds.ForGpu(null));
         Assert.Equal(Level.Neutral, Thresholds.ForBatteryHealth(null));
         Assert.Equal(Level.Neutral, Thresholds.ForCpu(null));
