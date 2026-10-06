@@ -117,7 +117,7 @@ public class WinFormsSmokeTests(ITestOutputHelper output)
 
         output.WriteLine($"螢幕：{string.Join("；", screens.Select(s => $"{s.DeviceName} {s.Bounds} 主要={s.IsPrimary}"))}");
         Assert.True(screens.Count >= 1, $"螢幕數 = {screens.Count}");
-        Assert.Single(screens.Where(s => s.IsPrimary));
+        Assert.Single(screens, s => s.IsPrimary);
         Assert.True(screens.All(s => !string.IsNullOrEmpty(s.DeviceName)));
     }
 
