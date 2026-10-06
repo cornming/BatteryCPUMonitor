@@ -59,6 +59,8 @@ jobs:
         env:
           MSYS_NO_PATHCONV: 1
           PYTHONUTF8: 1
+          # 自動更新的測試會對真正的 GitHub 查詢；帶上內建的 token 可以避免被限制查詢次數。
+          GITHUB_TOKEN: ${{ github.token }}
           SCREENSHOT_DIR: ${{ github.workspace }}\screenshots
         run: |
           # 測試失敗時先不中斷，讓下一行把失敗原因整理成錯誤註記。
@@ -100,6 +102,36 @@ jobs:
           cp publish/lite/BatteryCPUMonitor.exe "dist/BatteryCPUMonitor-v$v.exe"
           cp publish/standalone/BatteryCPUMonitor.exe "dist/BatteryCPUMonitor-v$v-standalone.exe"
           ls -l dist
+
+      # 自動更新靠這兩件事才能運作：執行檔要能自己說出版本號，並知道自己是精簡版還是完整版。
+      # 這裡把剛發布出來的兩個檔案真的執行一次，確認這兩項都正確。
+      - name: 自我檢查（實際執行發布出來的執行檔）
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $cases = @(
+            @{ File = "dist/BatteryCPUMonitor-v$v.exe";            Variant = "lite" },
+            @{ File = "dist/BatteryCPUMonitor-v$v-standalone.exe"; Variant = "standalone" }
+          )
+
+          foreach ($case in $cases) {
+            $report = Join-Path $env:RUNNER_TEMP "selfcheck-$($case.Variant).txt"
+            Remove-Item $report -ErrorAction SilentlyContinue
+            $file = (Resolve-Path $case.File).Path
+
+            $process = Start-Process -FilePath $file -ArgumentList "--self-check", "`"$report`"" -PassThru
+            if (-not $process.WaitForExit(120000)) {
+              $process.Kill()
+              throw "$($case.File) 自我檢查逾時"
+            }
+            if ($process.ExitCode -ne 0) { throw "$($case.File) 自我檢查失敗，結束碼 $($process.ExitCode)" }
+            if (-not (Test-Path $report)) { throw "$($case.File) 沒有產生報告" }
+
+            $text = Get-Content $report -Raw
+            Write-Host "$($case.File)：$(($text.Trim() -split "`r?`n") -join '，')"
+            if ($text -notmatch "(?m)^version=$([regex]::Escape($v))\r?$") { throw "$($case.File) 的版本號不是 $v" }
+            if ($text -notmatch "(?m)^variant=$($case.Variant)\r?$") { throw "$($case.File) 的種類不是 $($case.Variant)" }
+          }
 
       - uses: actions/upload-artifact@v7
         with:
