@@ -1,3 +1,4 @@
+using BatteryCPUMonitor.Sensors;
 using BatteryCPUMonitor.Updates;
 
 namespace BatteryCPUMonitor;
@@ -16,6 +17,13 @@ internal static class Program
         if (SelfCheckRunner.TryHandle(args, out int selfCheckExitCode))
         {
             return selfCheckExitCode;
+        }
+
+        // 感測器服務：以系統管理員權限另外啟動的同一個 exe，不開視窗，只負責讀感測器。
+        // 它是獨立的行程，不受單一執行個體的限制。
+        if (SensorHostProcess.TryHandle(args, out int sensorHostExitCode))
+        {
+            return sensorHostExitCode;
         }
 
         bool afterUpdate = args.Contains(UpdateRelauncher.AfterUpdateArgument);

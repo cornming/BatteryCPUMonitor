@@ -1,7 +1,9 @@
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using BatteryCPUMonitor.Metrics;
+using BatteryCPUMonitor.Sensors;
 using BatteryCPUMonitor.Updates;
+using Microsoft.Win32;
 
 namespace BatteryCPUMonitor;
 
@@ -26,6 +28,9 @@ internal sealed class BarForm : Form
     private const int FirstUpdateCheckMs = 15_000;
     private const int UpdateIntervalMs = 12 * 60 * 60 * 1000;
     private const string DialogCaption = "BatteryCPUMonitor";
+
+    // 啟動後等多久再詢問是否授權硬體感測器（讓其他通知先顯示完）。
+    private const int SensorPromptDelayMs = 9000;
 
     // 兩者都小於 1，視窗才會一直維持「分層視窗」樣式；滑鼠穿透需要它，切換時也不會閃爍。
     private const double RestingOpacity = 0.8;
@@ -58,11 +63,29 @@ internal sealed class BarForm : Form
     private readonly ToolStripMenuItem _showGpuItem = new("GPU 與顯示記憶體");
     private readonly ToolStripMenuItem _showDiskItem = new("磁碟讀寫");
     private readonly ToolStripMenuItem _showNetworkItem = new("網路速度");
+    private readonly ToolStripMenuItem _showTemperatureItem = new("溫度（需要硬體感測器）");
+    private readonly ToolStripMenuItem _showClockItem = new("頻率（CPU、GPU）");
+    private readonly ToolStripMenuItem _showPowerItem = new("功耗（需要硬體感測器）");
+    private readonly ToolStripMenuItem _showFansItem = new("風扇（需要硬體感測器）");
+    private readonly ToolStripMenuItem _sensorsMenu = new("硬體感測器");
+    private readonly ToolStripMenuItem _sensorsEnabledItem = new("啟用硬體感測器（需要系統管理員權限）");
+    private readonly ToolStripMenuItem _sensorsReconnectItem = new("重新連線（需要系統管理員權限）");
+    private readonly ToolStripMenuItem _sensorsStatusItem = new("狀態") { Enabled = false };
+    private readonly ToolStripMenuItem _pawnIoItem = new("PawnIO…");
+    private readonly SensorService _sensors = new(
+        new ElevatedHostLauncher(),
+        connectTimeout: TimeSpan.FromMinutes(3),
+        firstMessageTimeout: TimeSpan.FromSeconds(90),
+        staleAfter: TimeSpan.FromSeconds(8));
+    private readonly System.Windows.Forms.Timer _sensorPromptTimer = new();
+    private readonly MetricsCollector _collector;
+
+    // 硬體感測器每次啟動程式都要重新取得系統管理員權限。已啟用但還沒連線時，先用通知詢問，使用者點了才開始。
+    private bool _sensorPromptActive;
     private readonly NotifyIcon _tray = new();
     private readonly Icon _icon = LoadIcon();
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly System.Windows.Forms.Timer _updateTimer = new();
-    private readonly MetricsCollector _collector = new();
 
     private Font _font;
     private int _fontDpi;
@@ -90,6 +113,8 @@ internal sealed class BarForm : Form
     /// <param name="afterUpdate">這個程式是剛更新完、由舊版本啟動的；會顯示「已更新」的提示。</param>
     public BarForm(bool afterUpdate = false)
     {
+        _collector = new MetricsCollector(() => _sensors.Latest);
+
         Text = "BatteryCPUMonitor";
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
@@ -130,6 +155,11 @@ internal sealed class BarForm : Form
         {
             _tray.ShowBalloonTip(5000, "已更新", $"BatteryCPUMonitor 已更新到 v{AppVersion.CurrentText}。", ToolTipIcon.Info);
         }
+
+        _sensors.Changed += OnSensorsChanged;
+        _tray.BalloonTipClicked += (_, _) => StartSensorsAfterConsent();
+        _tray.BalloonTipClosed += (_, _) => _sensorPromptActive = false;
+        ScheduleSensorPrompt();
 
         _updateTimer.Interval = FirstUpdateCheckMs;
         _updateTimer.Tick += (_, _) =>
@@ -173,6 +203,8 @@ internal sealed class BarForm : Form
         {
             _timer.Dispose();
             _updateTimer.Dispose();
+            _sensorPromptTimer.Dispose();
+            _sensors.Dispose(); // 特權的感測器服務偵測到斷線會自己結束
             ReleaseTaskbar(); // Windows 10 會在這裡把工作清單還原
             _collector.Dispose();
             _tray.Visible = false;
@@ -199,6 +231,18 @@ internal sealed class BarForm : Form
         showItems.DropDownItems.Add(_showGpuItem);
         showItems.DropDownItems.Add(_showDiskItem);
         showItems.DropDownItems.Add(_showNetworkItem);
+        showItems.DropDownItems.Add(new ToolStripSeparator());
+        showItems.DropDownItems.Add(_showTemperatureItem);
+        showItems.DropDownItems.Add(_showClockItem);
+        showItems.DropDownItems.Add(_showPowerItem);
+        showItems.DropDownItems.Add(_showFansItem);
+
+        _sensorsMenu.DropDownItems.Add(_sensorsEnabledItem);
+        _sensorsMenu.DropDownItems.Add(_sensorsReconnectItem);
+        _sensorsMenu.DropDownItems.Add(new ToolStripSeparator());
+        _sensorsMenu.DropDownItems.Add(_sensorsStatusItem);
+        _sensorsMenu.DropDownItems.Add(new ToolStripSeparator());
+        _sensorsMenu.DropDownItems.Add(_pawnIoItem);
 
         _showBatteryItem.Click += (_, _) => ToggleItem(s => s.ShowBattery = !s.ShowBattery);
         _showBatteryDetailItem.Click += (_, _) => ToggleItem(s => s.ShowBatteryDetail = !s.ShowBatteryDetail);
@@ -206,6 +250,23 @@ internal sealed class BarForm : Form
         _showGpuItem.Click += (_, _) => ToggleItem(s => s.ShowGpu = !s.ShowGpu);
         _showDiskItem.Click += (_, _) => ToggleItem(s => s.ShowDisk = !s.ShowDisk);
         _showNetworkItem.Click += (_, _) => ToggleItem(s => s.ShowNetwork = !s.ShowNetwork);
+        _showTemperatureItem.Click += (_, _) => ToggleItem(s => s.ShowTemperature = !s.ShowTemperature);
+        _showClockItem.Click += (_, _) => ToggleItem(s => s.ShowClock = !s.ShowClock);
+        _showPowerItem.Click += (_, _) => ToggleItem(s => s.ShowPower = !s.ShowPower);
+        _showFansItem.Click += (_, _) => ToggleItem(s => s.ShowFans = !s.ShowFans);
+        _sensorsEnabledItem.Click += (_, _) =>
+        {
+            if (_settings.SensorsEnabled)
+            {
+                DisableSensors();
+            }
+            else
+            {
+                EnableSensors();
+            }
+        };
+        _sensorsReconnectItem.Click += (_, _) => ReconnectSensors();
+        _pawnIoItem.Click += (_, _) => ShowPawnIoHelp();
 
         _autoStartItem.Click += (_, _) => AutoStart.SetEnabled(!AutoStart.IsEnabled());
         _clickThroughItem.Click += (_, _) => SetClickThrough(!_settings.ClickThrough);
@@ -238,6 +299,14 @@ internal sealed class BarForm : Form
             _showGpuItem.Enabled = _collector.HasGpuCounters;
             _showDiskItem.Checked = _settings.ShowDisk;
             _showNetworkItem.Checked = _settings.ShowNetwork;
+            _showTemperatureItem.Checked = _settings.ShowTemperature;
+            _showClockItem.Checked = _settings.ShowClock;
+            _showPowerItem.Checked = _settings.ShowPower;
+            _showFansItem.Checked = _settings.ShowFans;
+            _sensorsEnabledItem.Checked = _settings.SensorsEnabled;
+            _sensorsReconnectItem.Enabled = _settings.SensorsEnabled && _sensors.State is SensorState.Off or SensorState.Failed;
+            _sensorsStatusItem.Text = "狀態：" + SensorStatusText();
+            _pawnIoItem.Text = IsPawnIoInstalled() ? "PawnIO：已安裝（CPU 與主機板感測器可用）" : "安裝 PawnIO（CPU 與主機板感測器需要）…";
             _autoStartItem.Checked = AutoStart.IsEnabled();
             _clickThroughItem.Checked = _settings.ClickThrough;
             RefreshTaskbarMenu();
@@ -254,6 +323,7 @@ internal sealed class BarForm : Form
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(showItems);
         _menu.Items.Add(_taskbarModeItem);
+        _menu.Items.Add(_sensorsMenu);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_autoStartItem);
         _menu.Items.Add(_clickThroughItem);
@@ -389,6 +459,198 @@ internal sealed class BarForm : Form
     {
         _taskbar?.Dispose();
         _taskbar = null;
+    }
+
+    // ---- 硬體感測器 ----
+
+    /// <summary>啟動時，之前已經啟用硬體感測器的話，用通知詢問要不要現在授權；不自己跳出系統管理員權限的視窗。</summary>
+    private void ScheduleSensorPrompt()
+    {
+        if (!_settings.SensorsEnabled)
+        {
+            return;
+        }
+
+        _sensorPromptTimer.Interval = SensorPromptDelayMs; // 讓「已更新」之類的通知先顯示完
+        _sensorPromptTimer.Tick += (_, _) =>
+        {
+            _sensorPromptTimer.Stop();
+            if (_settings.SensorsEnabled && _sensors.State == SensorState.Off)
+            {
+                _sensorPromptActive = true;
+                _tray.ShowBalloonTip(
+                    15000,
+                    "硬體感測器需要你同意",
+                    "點一下這則通知，開始授權系統管理員權限。不需要的話，到選單的「硬體感測器」取消勾選。",
+                    ToolTipIcon.Info);
+            }
+        };
+        _sensorPromptTimer.Start();
+    }
+
+    private void StartSensorsAfterConsent()
+    {
+        if (!_sensorPromptActive)
+        {
+            return;
+        }
+
+        _sensorPromptActive = false;
+        _sensors.Start();
+    }
+
+    private void EnableSensors()
+    {
+        DialogResult answer = MessageBox.Show(
+            "硬體感測器要讀取 CPU、主機板與顯示卡的感測器，這需要系統管理員權限。\n\n" +
+            "程式本身仍然以一般權限執行；只有另外啟動的一個「感測器服務」會以系統管理員權限執行。" +
+            "它只負責讀取數值並傳回來，不接受任何指令，程式結束時它也會跟著結束。\n\n" +
+            "接下來 Windows 會詢問你是否同意。要繼續嗎？",
+            DialogCaption,
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+        if (answer != DialogResult.Yes)
+        {
+            return;
+        }
+
+        _settings.SensorsEnabled = true;
+        if (!_settings.ShowTemperature && !_settings.ShowClock && !_settings.ShowPower && !_settings.ShowFans)
+        {
+            _settings.ShowTemperature = true; // 剛啟用就什麼都看不到會以為壞了，先打開溫度
+        }
+
+        _settings.Save(_settingsPath);
+        _sensorPromptActive = false;
+        _sensors.Start();
+        ApplyLayout();
+    }
+
+    private void DisableSensors()
+    {
+        _settings.SensorsEnabled = false;
+        _settings.Save(_settingsPath);
+        _sensorPromptActive = false;
+        _sensors.Stop();
+        ApplyLayout();
+    }
+
+    private void ReconnectSensors()
+    {
+        _sensorPromptActive = false;
+        _sensors.Start();
+    }
+
+    /// <summary>感測器服務的狀態在背景執行緒上改變，回到畫面執行緒處理。</summary>
+    private void OnSensorsChanged()
+    {
+        try
+        {
+            BeginInvoke(HandleSensorsChanged);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            // 程式正在關閉。
+        }
+    }
+
+    private void HandleSensorsChanged()
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        switch (_sensors.State)
+        {
+            case SensorState.Declined:
+                _settings.SensorsEnabled = false;
+                _settings.Save(_settingsPath);
+                _tray.ShowBalloonTip(6000, "硬體感測器沒有啟用", _sensors.Status, ToolTipIcon.Info);
+                break;
+
+            case SensorState.Failed:
+                _tray.ShowBalloonTip(8000, "硬體感測器無法使用", _sensors.Status, ToolTipIcon.Warning);
+                break;
+
+            case SensorState.Connected when _sensors.Status.Length > 0:
+                _tray.ShowBalloonTip(8000, "硬體感測器", _sensors.Status, ToolTipIcon.Warning); // 連上了，但感測器服務初始化失敗
+                break;
+        }
+
+        ApplyLayout();
+    }
+
+    private string SensorStatusText() => _sensors.State switch
+    {
+        SensorState.Off => _settings.SensorsEnabled ? "尚未連線（按「重新連線」）" : "未啟用",
+        SensorState.Starting => "等待授權與初始化…",
+        SensorState.Connected => ConnectedStatusText(),
+        _ => _sensors.Status,
+    };
+
+    private string ConnectedStatusText()
+    {
+        if (_sensors.Status.Length > 0)
+        {
+            return _sensors.Status;
+        }
+
+        SensorValues? values = _sensors.Latest;
+        if (values is null)
+        {
+            return "已連線，等待數值…";
+        }
+
+        if (values.CpuTemperature is null)
+        {
+            return IsPawnIoInstalled()
+                ? "已連線，但沒有取得 CPU 溫度（這台電腦可能不支援）"
+                : "已連線，但沒有取得 CPU 溫度（需要安裝 PawnIO）";
+        }
+
+        return "已連線";
+    }
+
+    private static bool IsPawnIoInstalled()
+    {
+        string? location = null;
+        try
+        {
+            using RegistryKey? key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO");
+            location = key?.GetValue("InstallLocation") as string;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            // 讀不到就當作沒有登錄，下面還會檢查預設的安裝位置。
+        }
+
+        return PawnIoDetector.IsInstalled(location, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), File.Exists);
+    }
+
+    /// <summary>說明 CPU 與主機板的感測器為什麼需要 PawnIO，並詢問要不要開啟官方網站。程式不會替使用者安裝驅動程式。</summary>
+    private void ShowPawnIoHelp()
+    {
+        string state = IsPawnIoInstalled()
+            ? "這台電腦已經偵測到 PawnIO。\n\n"
+            : "這台電腦還沒有偵測到 PawnIO。\n\n";
+
+        DialogResult answer = MessageBox.Show(
+            state +
+            "CPU 與主機板的感測器（CPU 溫度、CPU 功耗、風扇）必須透過核心驅動程式才讀得到，" +
+            "這裡使用的是 PawnIO（由 namazso 開發的簽章驅動程式）。顯示卡的溫度、功耗與頻率不需要它。\n\n" +
+            "本程式不會替你安裝驅動程式，要不要裝由你決定：\n" +
+            "• 網站：" + PawnIoDetector.OfficialSite + "\n" +
+            "• 或在系統管理員的命令提示字元執行：" + PawnIoDetector.WingetCommand + "\n\n" +
+            "要現在開啟 PawnIO 的官方網站嗎？",
+            DialogCaption,
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Information);
+
+        if (answer == DialogResult.Yes)
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(PawnIoDetector.OfficialSite) { UseShellExecute = true })?.Dispose();
+        }
     }
 
     // ---- 更新 ----

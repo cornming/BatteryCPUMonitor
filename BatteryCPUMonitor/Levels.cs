@@ -33,6 +33,14 @@ internal static class Thresholds
     public const double GpuWarn = 60;
     public const double GpuCritical = 85;
 
+    // 溫度（°C）。各家晶片的耐受度不同，這裡取一般筆電與桌機通用的保守值：
+    // 超過黃色門檻代表正在高負載，超過紅色門檻代表快要降頻或需要檢查散熱。
+    public const double CpuTemperatureWarn = 70;
+    public const double CpuTemperatureCritical = 85;
+
+    public const double GpuTemperatureWarn = 75;
+    public const double GpuTemperatureCritical = 88;
+
     // 電池健康度越低越差：低於 80% 開始留意，低於 60% 建議考慮更換。
     public const double BatteryHealthWarn = 80;
     public const double BatteryHealthCritical = 60;
@@ -49,6 +57,10 @@ internal static class Thresholds
     public static Level ForRam(double? percent) => Rising(percent, RamWarn, RamCritical);
 
     public static Level ForGpu(double? percent) => Rising(percent, GpuWarn, GpuCritical);
+
+    public static Level ForCpuTemperature(double? celsius) => Rising(celsius, CpuTemperatureWarn, CpuTemperatureCritical);
+
+    public static Level ForGpuTemperature(double? celsius) => Rising(celsius, GpuTemperatureWarn, GpuTemperatureCritical);
 
     public static Level ForBatteryHealth(double? percent) =>
         percent is not double value ? Level.Neutral

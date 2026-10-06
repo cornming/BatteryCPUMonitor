@@ -34,4 +34,9 @@
     <InternalsVisibleTo Include="BatteryCPUMonitor.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 讀取 CPU、GPU、主機板的感測器（授權 MPL-2.0，見 THIRD-PARTY-NOTICES.md）。只在選用的感測器服務行程裡使用 -->
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+  </ItemGroup>
+
 </Project>

@@ -1,3 +1,5 @@
+using BatteryCPUMonitor.Sensors;
+
 namespace BatteryCPUMonitor.Metrics;
 
 /// <summary>某一刻的所有監控數值。還沒有資料或這台電腦不支援的項目為 null。</summary>
@@ -10,7 +12,9 @@ internal readonly record struct MetricsSnapshot(
     NetworkRate? Network,
     double? GpuPercent = null,
     double? GpuMemoryBytes = null,
-    BatteryDetail? BatteryDetail = null)
+    BatteryDetail? BatteryDetail = null,
+    double? CpuClockMHz = null,
+    SensorValues? Sensors = null)
 {
     public static MetricsSnapshot Empty => default;
 }
@@ -26,6 +30,10 @@ internal sealed class MetricsCollector : IDisposable
     private const string DiskReadCounter = @"\PhysicalDisk(_Total)\Disk Read Bytes/sec";
     private const string DiskWriteCounter = @"\PhysicalDisk(_Total)\Disk Write Bytes/sec";
 
+    // 目前頻率 = 標稱頻率 × 效能百分比，工作管理員顯示的「速度」就是這樣算的。不需要系統管理員權限。
+    private const string CpuFrequencyCounter = @"\Processor Information(_Total)\Processor Frequency";
+    private const string CpuPerformanceCounter = @"\Processor Information(_Total)\% Processor Performance";
+
     // 與工作管理員「效能 → GPU」相同的資料來源。每個程式在每個 GPU 引擎上各有一筆，所以用萬用字元。
     private const string GpuEngineCounter = @"\GPU Engine(*)\Utilization Percentage";
     private const string GpuMemoryCounter = @"\GPU Adapter Memory(*)\Dedicated Usage";
@@ -35,6 +43,9 @@ internal sealed class MetricsCollector : IDisposable
     private readonly IntPtr? _cpu;
     private readonly IntPtr? _diskRead;
     private readonly IntPtr? _diskWrite;
+    private readonly IntPtr? _cpuFrequency;
+    private readonly IntPtr? _cpuPerformance;
+    private readonly Func<SensorValues?>? _sensors;
     private readonly SystemTimesCpu _cpuFallback = new();
     private readonly NetworkSampler _network = new();
 
@@ -47,14 +58,18 @@ internal sealed class MetricsCollector : IDisposable
     private readonly BatteryDetailReader _batteryDetail = new();
     private bool _disposed;
 
-    public MetricsCollector()
+    /// <param name="sensors">提供硬體感測器數值的函式（沒有啟用感測器時回傳 null）；可以省略。</param>
+    public MetricsCollector(Func<SensorValues?>? sensors = null)
     {
+        _sensors = sensors;
         _pdh = PdhQuery.TryOpen();
         if (_pdh is not null)
         {
             _cpu = _pdh.TryAdd(CpuCounter);
             _diskRead = _pdh.TryAdd(DiskReadCounter);
             _diskWrite = _pdh.TryAdd(DiskWriteCounter);
+            _cpuFrequency = _pdh.TryAdd(CpuFrequencyCounter);
+            _cpuPerformance = _pdh.TryAdd(CpuPerformanceCounter);
             _pdh.Collect(); // 速率要兩筆樣本相減才算得出來，先收第一筆當基準
         }
 
@@ -85,11 +100,13 @@ internal sealed class MetricsCollector : IDisposable
             double? cpu = null;
             double? diskRead = null;
             double? diskWrite = null;
+            double? clock = null;
             if (_pdh is not null && _pdh.Collect())
             {
                 cpu = _pdh.Read(_cpu) is double value ? Math.Clamp(value, 0, 100) : null;
                 diskRead = NonNegative(_pdh.Read(_diskRead));
                 diskWrite = NonNegative(_pdh.Read(_diskWrite));
+                clock = CpuClock.CurrentMegahertz(_pdh.Read(_cpuFrequency), _pdh.Read(_cpuPerformance, allowAbove100: true));
             }
 
             double? gpu = null;
@@ -124,7 +141,9 @@ internal sealed class MetricsCollector : IDisposable
                 _network.Sample(),
                 gpu,
                 gpuMemory,
-                batteryDetail);
+                batteryDetail,
+                clock,
+                _sensors?.Invoke());
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Globalization;
 using BatteryCPUMonitor.Metrics;
+using BatteryCPUMonitor.Sensors;
 
 namespace BatteryCPUMonitor;
 
@@ -13,9 +14,22 @@ internal readonly record struct BarCell(string Label, string Value, Level Level)
 internal readonly record struct BarColumn(BarCell Top, BarCell Bottom, string ValueTemplate);
 
 /// <summary>使用者選擇要顯示哪些項目。</summary>
-internal readonly record struct VisibleItems(bool Battery, bool BatteryDetail, bool CpuRam, bool Gpu, bool Disk, bool Network)
+internal readonly record struct VisibleItems(
+    bool Battery,
+    bool BatteryDetail,
+    bool CpuRam,
+    bool Gpu,
+    bool Disk,
+    bool Network,
+    bool Temperature = false,
+    bool Clock = false,
+    bool Power = false,
+    bool Fans = false)
 {
-    public static VisibleItems All => new(true, true, true, true, true, true);
+    public static VisibleItems All => new(true, true, true, true, true, true, true, true, true, true);
+
+    /// <summary>新安裝時的預設：舊的項目全開，後來加入的感測器項目全關。</summary>
+    public static VisibleItems Default => All with { Temperature = false, Clock = false, Power = false, Fans = false };
 }
 
 /// <summary>決定橫條上要顯示的內容。純計算，不碰畫面。</summary>
@@ -24,6 +38,10 @@ internal static class BarContent
     private const string PercentTemplate = "100%";
     private const string RateTemplate = "1023KB";
     private const string WattsTemplate = "-99.9W";
+    private const string TemperatureTemplate = "100°C";
+    private const string ClockTemplate = "4.2GHz";
+    private const string SensorPowerTemplate = "99.9W";
+    private const string FanTemplate = "9999rpm";
 
     /// <summary>
     /// 依序產生各欄：電池、電池詳情、CPU／RAM、GPU、磁碟讀寫、網路上下傳。
@@ -63,6 +81,41 @@ internal static class BarContent
                 RateTemplate));
         }
 
+        SensorValues? sensors = m.Sensors;
+
+        if (visible.Temperature && sensors is { CpuTemperature: not null } or { GpuTemperature: not null })
+        {
+            columns.Add(new BarColumn(
+                new BarCell("CPU溫", SensorFormat.Temperature(sensors!.CpuTemperature), Thresholds.ForCpuTemperature(sensors.CpuTemperature)),
+                new BarCell("GPU溫", SensorFormat.Temperature(sensors.GpuTemperature), Thresholds.ForGpuTemperature(sensors.GpuTemperature)),
+                TemperatureTemplate));
+        }
+
+        if (visible.Clock && (m.CpuClockMHz is not null || sensors?.GpuClockMHz is not null))
+        {
+            columns.Add(new BarColumn(
+                new BarCell("CPU頻", SensorFormat.Clock(m.CpuClockMHz), Informational(m.CpuClockMHz)),
+                new BarCell("GPU頻", SensorFormat.Clock(sensors?.GpuClockMHz), Informational(sensors?.GpuClockMHz)),
+                ClockTemplate));
+        }
+
+        if (visible.Power && sensors is { CpuPowerWatts: not null } or { GpuPowerWatts: not null })
+        {
+            columns.Add(new BarColumn(
+                new BarCell("CPU功耗", SensorFormat.Power(sensors!.CpuPowerWatts), Informational(sensors.CpuPowerWatts)),
+                new BarCell("GPU功耗", SensorFormat.Power(sensors.GpuPowerWatts), Informational(sensors.GpuPowerWatts)),
+                SensorPowerTemplate));
+        }
+
+        if (visible.Fans && sensors is { Fans.Count: > 0 })
+        {
+            FanReading first = sensors.Fans[0];
+            BarCell second = sensors.Fans.Count > 1
+                ? new BarCell(sensors.Fans[1].Label, SensorFormat.Fan(sensors.Fans[1].Rpm), Level.Good)
+                : new BarCell(string.Empty, string.Empty, Level.Neutral);
+            columns.Add(new BarColumn(new BarCell(first.Label, SensorFormat.Fan(first.Rpm), Level.Good), second, FanTemplate));
+        }
+
         if (visible.Disk)
         {
             columns.Add(new BarColumn(
@@ -88,6 +141,9 @@ internal static class BarContent
 
         return columns;
     }
+
+    /// <summary>頻率、功耗這類數值不是警示，有數值就顯示成綠色、沒有就是灰色。</summary>
+    private static Level Informational(double? value) => value is null ? Level.Neutral : Level.Good;
 
     private static BarColumn CpuRamColumn(MetricsSnapshot m) => new(
         new BarCell("CPU", Percent(m.CpuPercent), Thresholds.ForCpu(m.CpuPercent)),

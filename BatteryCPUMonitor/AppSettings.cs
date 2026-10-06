@@ -47,8 +47,22 @@ internal sealed class AppSettings
 
     public bool ShowNetwork { get; set; } = true;
 
+    // 後來加入的項目預設關閉：自動更新會悄悄換成新版本，不該讓橫條自己多出幾欄。
+    public bool ShowTemperature { get; set; }
+
+    public bool ShowClock { get; set; }
+
+    public bool ShowPower { get; set; }
+
+    public bool ShowFans { get; set; }
+
+    /// <summary>啟用硬體感測器（CPU、GPU 溫度、功耗、風扇）。需要系統管理員權限，每次啟動程式都要重新同意。</summary>
+    public bool SensorsEnabled { get; set; }
+
     [JsonIgnore]
-    public VisibleItems Visible => new(ShowBattery, ShowBatteryDetail, ShowCpuRam, ShowGpu, ShowDisk, ShowNetwork);
+    public VisibleItems Visible => new(
+        ShowBattery, ShowBatteryDetail, ShowCpuRam, ShowGpu, ShowDisk, ShowNetwork,
+        ShowTemperature, ShowClock, ShowPower, ShowFans);
 
     /// <summary>使用者拖曳後的錨點（橫條底邊中點）；沒拖過為 null。</summary>
     [JsonIgnore]
