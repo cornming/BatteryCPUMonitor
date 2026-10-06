@@ -89,6 +89,35 @@ public class AppSettingsTests : IDisposable
     }
 
     [Fact]
+    public void 嵌入哪個螢幕的工作列_預設為空值_代表主螢幕()
+    {
+        Assert.Null(AppSettings.Load(SettingsPath).TaskbarMonitor);
+    }
+
+    [Fact]
+    public void 嵌入哪個螢幕的工作列_存檔後再讀取仍保留()
+    {
+        new AppSettings { TaskbarMode = true, TaskbarMonitor = @"\\.\DISPLAY2" }.Save(SettingsPath);
+
+        AppSettings loaded = AppSettings.Load(SettingsPath);
+
+        Assert.True(loaded.TaskbarMode);
+        Assert.Equal(@"\\.\DISPLAY2", loaded.TaskbarMonitor);
+    }
+
+    [Fact]
+    public void 舊版設定檔沒有螢幕欄位_讀取後維持主螢幕()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+        File.WriteAllText(SettingsPath, "{ \"taskbarMode\": true }");
+
+        AppSettings loaded = AppSettings.Load(SettingsPath);
+
+        Assert.True(loaded.TaskbarMode);
+        Assert.Null(loaded.TaskbarMonitor);
+    }
+
+    [Fact]
     public void 只有一個座標_不視為有效位置()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);

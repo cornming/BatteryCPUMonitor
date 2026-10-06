@@ -63,7 +63,7 @@ public class WinFormsSmokeTests(ITestOutputHelper output)
                 new MetricsSnapshot(default, 12, 61, 1024, 2048, new NetworkRate(100, 200)),
                 VisibleItems.All);
 
-            bool available = TaskbarForm.TaskbarAvailable();
+            bool available = TaskbarForm.HasTaskbarOn(TaskbarForm.ResolveTarget(null));
             using var taskbar = new TaskbarForm(() => { });
             bool attached = taskbar.TryAttach(clickThrough: false);
 
@@ -83,6 +83,42 @@ public class WinFormsSmokeTests(ITestOutputHelper output)
                 $"找得到工作列 = {available}，掛載成功 = {attached}，仍掛著 = {taskbar.IsAttached}，" +
                 $"小工具範圍 = {taskbar.Bounds}，系統版本 = {Environment.OSVersion.Version}");
         });
+    }
+
+    [Fact]
+    public void 工作列小工具_指定的螢幕不存在時改掛在主螢幕上()
+    {
+        if (NotOnCi) { return; }
+
+        RunOnStaThread(() =>
+        {
+            ScreenInfo primary = TaskbarForm.ResolveTarget(null);
+            using var taskbar = new TaskbarForm(() => { });
+
+            bool attached = taskbar.TryAttach(clickThrough: false, targetDevice: @"\\.\DISPLAY99");
+
+            output.WriteLine(
+                $"螢幕數 = {TaskbarForm.Screens().Count}，主螢幕 = {primary.DeviceName}，" +
+                $"掛載成功 = {attached}，實際掛在 = {taskbar.TargetDevice}");
+            Assert.True(primary.IsPrimary);
+            if (attached)
+            {
+                Assert.Equal(primary.DeviceName, taskbar.TargetDevice);
+            }
+        });
+    }
+
+    [Fact]
+    public void 螢幕清單_至少有一個主螢幕_且每個螢幕都有裝置名稱()
+    {
+        if (NotOnCi) { return; }
+
+        IReadOnlyList<ScreenInfo> screens = TaskbarForm.Screens();
+
+        output.WriteLine($"螢幕：{string.Join("；", screens.Select(s => $"{s.DeviceName} {s.Bounds} 主要={s.IsPrimary}"))}");
+        Assert.True(screens.Count >= 1, $"螢幕數 = {screens.Count}");
+        Assert.Single(screens.Where(s => s.IsPrimary));
+        Assert.True(screens.All(s => !string.IsNullOrEmpty(s.DeviceName)));
     }
 
     /// <summary>處理視窗訊息一段時間，讓計時器、背景讀取的結果與繪製都有機會執行。</summary>
