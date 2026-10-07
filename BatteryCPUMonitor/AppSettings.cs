@@ -1,4 +1,5 @@
 using System.Drawing;
+using BatteryCPUMonitor.Metrics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -55,6 +56,17 @@ internal sealed class AppSettings
     public bool ShowPower { get; set; }
 
     public bool ShowFans { get; set; }
+
+    /// <summary>CPU 使用率的算法，存成文字（time 或 utility）。預設依忙碌時間，與新版工作管理員一致。</summary>
+    [JsonPropertyName("cpuUsageMode")]
+    public string CpuUsageModeName { get; set; } = CpuUsageModes.TimeName;
+
+    [JsonIgnore]
+    public CpuUsageMode CpuMode
+    {
+        get => CpuUsageModes.Parse(CpuUsageModeName);
+        set => CpuUsageModeName = CpuUsageModes.ToText(value);
+    }
 
     /// <summary>啟用硬體感測器（CPU、GPU 溫度、功耗、風扇）。需要系統管理員權限，每次啟動程式都要重新同意。</summary>
     public bool SensorsEnabled { get; set; }

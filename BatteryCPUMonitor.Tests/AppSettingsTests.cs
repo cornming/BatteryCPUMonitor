@@ -1,4 +1,5 @@
 using System.Drawing;
+using BatteryCPUMonitor.Metrics;
 using Xunit;
 
 namespace BatteryCPUMonitor.Tests;
@@ -141,6 +142,45 @@ public class AppSettingsTests : IDisposable
         Assert.True(loaded.Visible.Temperature);
         Assert.True(loaded.Visible.Fans);
         Assert.False(loaded.Visible.Power);
+    }
+
+    [Fact]
+    public void CPU使用率算法預設為忙碌時間()
+    {
+        Assert.Equal(CpuUsageMode.Time, AppSettings.Load(SettingsPath).CpuMode);
+    }
+
+    [Fact]
+    public void CPU使用率算法_存檔後再讀取仍保留()
+    {
+        new AppSettings { CpuMode = CpuUsageMode.Utility }.Save(SettingsPath);
+
+        Assert.Equal(CpuUsageMode.Utility, AppSettings.Load(SettingsPath).CpuMode);
+        Assert.Contains("\"cpuUsageMode\": \"utility\"", File.ReadAllText(SettingsPath));
+    }
+
+    [Fact]
+    public void 舊版設定檔沒有CPU使用率算法_讀取後採用忙碌時間()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+        File.WriteAllText(SettingsPath, "{ \"anchorX\": 100, \"anchorY\": 200 }");
+
+        AppSettings loaded = AppSettings.Load(SettingsPath);
+
+        Assert.Equal(CpuUsageMode.Time, loaded.CpuMode);
+        Assert.Equal(new Point(100, 200), loaded.Anchor); // 其他設定不受影響
+    }
+
+    [Fact]
+    public void CPU使用率算法的值寫壞了_只影響這一項_不會讓整個設定檔作廢()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+        File.WriteAllText(SettingsPath, "{ \"anchorX\": 100, \"anchorY\": 200, \"cpuUsageMode\": \"???\" }");
+
+        AppSettings loaded = AppSettings.Load(SettingsPath);
+
+        Assert.Equal(CpuUsageMode.Time, loaded.CpuMode);
+        Assert.Equal(new Point(100, 200), loaded.Anchor);
     }
 
     [Fact]

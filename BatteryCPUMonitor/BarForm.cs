@@ -63,6 +63,15 @@ internal sealed class BarForm : Form
     private readonly ToolStripMenuItem _showGpuItem = new("GPU 與顯示記憶體");
     private readonly ToolStripMenuItem _showDiskItem = new("磁碟讀寫");
     private readonly ToolStripMenuItem _showNetworkItem = new("網路速度");
+    private readonly ToolStripMenuItem _cpuModeMenu = new("CPU 使用率算法");
+    private readonly ToolStripMenuItem _cpuTimeItem = new("依忙碌時間（與新版工作管理員一致）")
+    {
+        ToolTipText = "忙碌時間 ÷ 總時間。Windows 11 24H2 之後的工作管理員用這種算法。",
+    };
+    private readonly ToolStripMenuItem _cpuUtilityItem = new("依處理器效能（考慮加速與降頻）")
+    {
+        ToolTipText = "Processor Utility：CPU 跑在標稱頻率以上時數字會比較高。舊版 Windows 10 的工作管理員用這種算法。",
+    };
     private readonly ToolStripMenuItem _showTemperatureItem = new("溫度（需要硬體感測器）");
     private readonly ToolStripMenuItem _showClockItem = new("頻率（CPU、GPU）");
     private readonly ToolStripMenuItem _showPowerItem = new("功耗（需要硬體感測器）");
@@ -113,7 +122,7 @@ internal sealed class BarForm : Form
     /// <param name="afterUpdate">這個程式是剛更新完、由舊版本啟動的；會顯示「已更新」的提示。</param>
     public BarForm(bool afterUpdate = false)
     {
-        _collector = new MetricsCollector(() => _sensors.Latest);
+        _collector = new MetricsCollector(() => _sensors.Latest) { CpuMode = _settings.CpuMode };
 
         Text = "BatteryCPUMonitor";
         AutoScaleMode = AutoScaleMode.None;
@@ -237,6 +246,11 @@ internal sealed class BarForm : Form
         showItems.DropDownItems.Add(_showPowerItem);
         showItems.DropDownItems.Add(_showFansItem);
 
+        _cpuModeMenu.DropDownItems.Add(_cpuTimeItem);
+        _cpuModeMenu.DropDownItems.Add(_cpuUtilityItem);
+        _cpuTimeItem.Click += (_, _) => SetCpuMode(CpuUsageMode.Time);
+        _cpuUtilityItem.Click += (_, _) => SetCpuMode(CpuUsageMode.Utility);
+
         _sensorsMenu.DropDownItems.Add(_sensorsEnabledItem);
         _sensorsMenu.DropDownItems.Add(_sensorsReconnectItem);
         _sensorsMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -303,6 +317,8 @@ internal sealed class BarForm : Form
             _showClockItem.Checked = _settings.ShowClock;
             _showPowerItem.Checked = _settings.ShowPower;
             _showFansItem.Checked = _settings.ShowFans;
+            _cpuTimeItem.Checked = _settings.CpuMode == CpuUsageMode.Time;
+            _cpuUtilityItem.Checked = _settings.CpuMode == CpuUsageMode.Utility;
             _sensorsEnabledItem.Checked = _settings.SensorsEnabled;
             _sensorsReconnectItem.Enabled = _settings.SensorsEnabled && _sensors.State is SensorState.Off or SensorState.Failed;
             _sensorsStatusItem.Text = "狀態：" + SensorStatusText();
@@ -322,6 +338,7 @@ internal sealed class BarForm : Form
         _menu.Items.Add(new ToolStripMenuItem($"BatteryCPUMonitor v{Application.ProductVersion}") { Enabled = false });
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(showItems);
+        _menu.Items.Add(_cpuModeMenu);
         _menu.Items.Add(_taskbarModeItem);
         _menu.Items.Add(_sensorsMenu);
         _menu.Items.Add(new ToolStripSeparator());
@@ -333,6 +350,13 @@ internal sealed class BarForm : Form
         _menu.Items.Add(_autoUpdateItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(close);
+    }
+
+    private void SetCpuMode(CpuUsageMode mode)
+    {
+        _settings.CpuMode = mode;
+        _settings.Save(_settingsPath);
+        _collector.CpuMode = mode; // 下一秒的取樣起生效
     }
 
     private void ToggleItem(Action<AppSettings> toggle)

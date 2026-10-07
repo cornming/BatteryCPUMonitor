@@ -25,7 +25,8 @@ internal readonly record struct MetricsSnapshot(
 /// </summary>
 internal sealed class MetricsCollector : IDisposable
 {
-    // 「Processor Utility」比較接近工作管理員顯示的 CPU%。
+    // 「Processor Utility」會把 CPU 加速與降頻算進去，只在使用者選了「依處理器效能」時才採用；
+    // 預設是依忙碌時間（GetSystemTimes），見 CpuUsageMode。
     private const string CpuCounter = @"\Processor Information(_Total)\% Processor Utility";
     private const string DiskReadCounter = @"\PhysicalDisk(_Total)\Disk Read Bytes/sec";
     private const string DiskWriteCounter = @"\PhysicalDisk(_Total)\Disk Write Bytes/sec";
@@ -57,6 +58,7 @@ internal sealed class MetricsCollector : IDisposable
 
     private readonly BatteryDetailReader _batteryDetail = new();
     private bool _disposed;
+    private int _cpuMode;
 
     /// <param name="sensors">提供硬體感測器數值的函式（沒有啟用感測器時回傳 null）；可以省略。</param>
     public MetricsCollector(Func<SensorValues?>? sensors = null)
@@ -83,6 +85,13 @@ internal sealed class MetricsCollector : IDisposable
 
     /// <summary>這台電腦有沒有提供 GPU 計數器（需要 Windows 10 1709 以上與支援的顯示驅動程式）。</summary>
     public bool HasGpuCounters => _gpuEngine is not null || _gpuMemory is not null;
+
+    /// <summary>CPU 使用率的算法。可以隨時改，下一次取樣起生效。</summary>
+    public CpuUsageMode CpuMode
+    {
+        get => (CpuUsageMode)Volatile.Read(ref _cpuMode);
+        set => Volatile.Write(ref _cpuMode, (int)value);
+    }
 
     /// <param name="visible">目前要顯示的項目；沒有要顯示的項目會略過較花時間的讀取。</param>
     public MetricsSnapshot Sample(VisibleItems visible)
@@ -134,7 +143,7 @@ internal sealed class MetricsCollector : IDisposable
 
             return new MetricsSnapshot(
                 battery,
-                cpu ?? cpuFallback,
+                CpuUsageModes.Choose(CpuMode, utility: cpu, time: cpuFallback),
                 MemoryReader.ReadUsedPercent(),
                 diskRead,
                 diskWrite,

@@ -1,3 +1,5 @@
+using Xunit.Abstractions;
+using System.Diagnostics;
 using BatteryCPUMonitor.Metrics;
 using Xunit;
 
@@ -7,7 +9,7 @@ namespace BatteryCPUMonitor.Tests;
 /// 在真正的 Windows 上實際呼叫系統 API，確認與 Windows 之間的資料結構對接沒有寫錯。
 /// 這些測試在 GitHub Actions 的 Windows 主機上執行；非 Windows 環境直接略過。
 /// </summary>
-public class LiveSystemTests
+public class LiveSystemTests(ITestOutputHelper output)
 {
     private static bool NotWindows => !OperatingSystem.IsWindows();
 
@@ -103,6 +105,66 @@ public class LiveSystemTests
         BatteryDetail? detail = reader.Read(pluggedIn: true, charging: false);
 
         Assert.True(detail is null || detail.Value.HealthPercent is null or (> 0 and <= 100), $"電池詳情 = {detail}");
+    }
+
+    [Theory]
+    [InlineData(CpuUsageMode.Time)]
+    [InlineData(CpuUsageMode.Utility)]
+    public void 收集器_兩種CPU算法在第二次取樣起都在零到一百之間(CpuUsageMode mode)
+    {
+        if (NotWindows) { return; }
+
+        using var collector = new MetricsCollector { CpuMode = mode };
+        collector.Sample(VisibleItems.All);
+        Thread.Sleep(600);
+        MetricsSnapshot m = collector.Sample(VisibleItems.All);
+
+        output.WriteLine($"{mode}：CPU = {m.CpuPercent}");
+        Assert.True(m.CpuPercent is >= 0 and <= 100, $"{mode}：CPU = {m.CpuPercent}");
+    }
+
+    [Fact]
+    public void 收集器_算法可以在執行中切換()
+    {
+        if (NotWindows) { return; }
+
+        using var collector = new MetricsCollector();
+        Assert.Equal(CpuUsageMode.Time, collector.CpuMode);
+
+        collector.CpuMode = CpuUsageMode.Utility;
+
+        Assert.Equal(CpuUsageMode.Utility, collector.CpuMode);
+    }
+
+    /// <summary>
+    /// 監控程式自己也會用掉 CPU，用太多的話數字就會被自己拉高。
+    /// 這裡量「每次取樣」平均花多少處理器時間（全部項目都打開，包含最花時間的 GPU 與網路）。
+    /// </summary>
+    [Fact]
+    public void 收集器自己的CPU負擔_每次取樣不會用掉太多處理器時間()
+    {
+        if (NotWindows) { return; }
+
+        using var collector = new MetricsCollector();
+        collector.Sample(VisibleItems.All);
+        Thread.Sleep(300);
+        collector.Sample(VisibleItems.All);
+
+        using Process self = Process.GetCurrentProcess();
+        TimeSpan before = self.TotalProcessorTime;
+        const int samples = 20;
+        for (int i = 0; i < samples; i++)
+        {
+            collector.Sample(VisibleItems.All);
+            Thread.Sleep(50);
+        }
+
+        self.Refresh();
+        double perSampleMs = (self.TotalProcessorTime - before).TotalMilliseconds / samples;
+        output.WriteLine($"每次取樣平均花 {perSampleMs:0.0} 毫秒的處理器時間（每秒取樣一次，約佔一顆核心的 {perSampleMs / 10:0.0}%）");
+
+        // 每秒取樣一次，超過 100 毫秒就等於一直佔掉一顆核心的一成以上，不合理。
+        Assert.True(perSampleMs < 100, $"每次取樣平均 {perSampleMs:0.0} 毫秒");
     }
 
     [Fact]
