@@ -137,6 +137,93 @@ public class LiveSystemTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// 在「同一個時間區間」裡同時量三種數字：我們自己用 GetSystemTimes 算的忙碌時間、Windows 的 % Processor Time 計數器、
+    /// Windows 的 % Processor Utility 計數器。前兩者應該幾乎一樣（驗證忙碌時間算法沒有算錯）；第三者可以不同。
+    /// 量測期間讓每個邏輯處理器大約一半的時間在忙。
+    /// </summary>
+    [Fact]
+    public void CPU使用率_忙碌時間算法與Windows自己的處理器時間計數器一致()
+    {
+        if (NotWindows) { return; }
+
+        using PdhQuery? query = PdhQuery.TryOpen();
+        Assert.NotNull(query);
+        IntPtr? time = query.TryAdd(@"\Processor Information(_Total)\% Processor Time");
+        IntPtr? utility = query.TryAdd(@"\Processor Information(_Total)\% Processor Utility");
+        Assert.NotNull(time);
+
+        var systemTimes = new SystemTimesCpu();
+        query.Collect();
+        systemTimes.Sample();
+
+        using var stop = new CancellationTokenSource();
+        Task[] load = Enumerable.Range(0, Environment.ProcessorCount).Select(_ => Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                long start = Stopwatch.GetTimestamp();
+                while (Stopwatch.GetElapsedTime(start) < TimeSpan.FromMilliseconds(50)) { }
+                Thread.Sleep(50);
+            }
+        })).ToArray();
+
+        Thread.Sleep(3000);
+        query.Collect();
+        double? pdhTime = query.Read(time, allowAbove100: true);
+        double? pdhUtility = query.Read(utility, allowAbove100: true);
+        double? ours = systemTimes.Sample();
+
+        stop.Cancel();
+        Task.WaitAll(load);
+
+        output.WriteLine($"同一個 3 秒區間（{Environment.ProcessorCount} 個邏輯處理器）：忙碌時間（GetSystemTimes）= {ours:0.0}%，% Processor Time = {pdhTime:0.0}%，% Processor Utility = {pdhUtility:0.0}%");
+        Assert.NotNull(ours);
+        Assert.NotNull(pdhTime);
+        Assert.True(Math.Abs(ours.Value - pdhTime.Value) < 15, $"忙碌時間 {ours:0.0}% 與 Windows 的 % Processor Time {pdhTime:0.0}% 差太多");
+        Assert.True(ours.Value > 20, $"有負載時應該明顯大於 0，實際 {ours:0.0}%");
+    }
+
+    /// <summary>診斷用：量收集器每一段各花多少處理器時間，不是正確性測試。</summary>
+    [Fact]
+    public void 診斷_收集器各段花費的時間()
+    {
+        if (NotWindows) { return; }
+
+        const int rounds = 20;
+        var network = new NetworkSampler();
+        using PdhQuery? query = PdhQuery.TryOpen();
+        IntPtr? read = query?.TryAdd(@"\PhysicalDisk(_Total)\Disk Read Bytes/sec");
+        using var gpuQuery = PdhQuery.TryOpen();
+        IntPtr? engines = gpuQuery?.TryAdd(@"\GPU Engine(*)\Utilization Percentage");
+        IntPtr? memory = gpuQuery?.TryAdd(@"\GPU Adapter Memory(*)\Dedicated Usage");
+        var times = new SystemTimesCpu();
+
+        double Measure(string name, Action action)
+        {
+            action(); // 暖機
+            using Process self = Process.GetCurrentProcess();
+            TimeSpan before = self.TotalProcessorTime;
+            for (int i = 0; i < rounds; i++)
+            {
+                action();
+            }
+
+            self.Refresh();
+            double ms = (self.TotalProcessorTime - before).TotalMilliseconds / rounds;
+            output.WriteLine($"{name}：{ms:0.0} 毫秒");
+            return ms;
+        }
+
+        Measure("網路（列舉網卡與流量）", () => network.Sample());
+        Measure("一般效能計數器收集", () => { query?.Collect(); query?.Read(read); });
+        Measure("GPU 計數器收集與讀取（萬用字元）", () => { gpuQuery?.Collect(); gpuQuery?.ReadArray(engines); gpuQuery?.ReadArray(memory); });
+        Measure("電池狀態", () => BatteryReader.Read());
+        Measure("記憶體", () => MemoryReader.ReadUsedPercent());
+        Measure("GetSystemTimes", () => times.Sample());
+        output.WriteLine($"GPU 計數器的執行個體數：{gpuQuery?.ReadArray(engines)?.Count}");
+    }
+
+    /// <summary>
     /// 監控程式自己也會用掉 CPU，用太多的話數字就會被自己拉高。
     /// 這裡量「每次取樣」平均花多少處理器時間（全部項目都打開，包含最花時間的 GPU 與網路）。
     /// </summary>
