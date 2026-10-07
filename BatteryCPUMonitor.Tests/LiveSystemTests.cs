@@ -142,7 +142,7 @@ public class LiveSystemTests(ITestOutputHelper output)
     /// 量測期間讓每個邏輯處理器大約一半的時間在忙。
     /// </summary>
     [Fact]
-    public void CPU使用率_忙碌時間算法與Windows自己的處理器時間計數器一致()
+    public async Task CPU使用率_忙碌時間算法與Windows自己的處理器時間計數器一致()
     {
         if (NotWindows) { return; }
 
@@ -167,14 +167,14 @@ public class LiveSystemTests(ITestOutputHelper output)
             }
         })).ToArray();
 
-        Thread.Sleep(3000);
+        await Task.Delay(3000);
         query.Collect();
         double? pdhTime = query.Read(time, allowAbove100: true);
         double? pdhUtility = query.Read(utility, allowAbove100: true);
         double? ours = systemTimes.Sample();
 
         stop.Cancel();
-        Task.WaitAll(load);
+        await Task.WhenAll(load);
 
         output.WriteLine($"同一個 3 秒區間（{Environment.ProcessorCount} 個邏輯處理器）：忙碌時間（GetSystemTimes）= {ours:0.0}%，% Processor Time = {pdhTime:0.0}%，% Processor Utility = {pdhUtility:0.0}%");
         Assert.NotNull(ours);

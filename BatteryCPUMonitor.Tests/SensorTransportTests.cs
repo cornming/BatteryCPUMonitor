@@ -88,16 +88,27 @@ public class SensorTransportTests
     public async Task 服務端每次讀一則就送出一行_直到被取消()
     {
         using var stream = new MemoryStream();
-        using var source = new FakeSource(n => Message(new SensorReading("Cpu", "Temperature", "CPU Package", 50 + n)));
-        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
+        using var cancel = new CancellationTokenSource();
 
-        await SensorHostLoop.RunAsync(stream, source, TimeSpan.FromMilliseconds(50), cancel.Token);
+        // 以「讀了幾次」而不是「過了多久」來決定何時停：第四次讀取時要求取消，所以前三則會送出、第四則不會。
+        using var source = new FakeSource(n =>
+        {
+            if (n == 4)
+            {
+                cancel.Cancel();
+            }
+
+            return Message(new SensorReading("Cpu", "Temperature", "CPU Package", 50 + n));
+        });
+
+        await SensorHostLoop.RunAsync(stream, source, TimeSpan.FromMilliseconds(10), cancel.Token);
 
         string[] lines = Encoding.UTF8.GetString(stream.ToArray()).Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.True(lines.Length >= 3, $"只送出 {lines.Length} 則");
+        Assert.Equal(3, lines.Length);
         Assert.True(lines.All(l => SensorJson.TryDeserialize(l) is not null));
         Assert.Equal(51.0, SensorJson.TryDeserialize(lines[0])!.Readings[0].Value);
         Assert.Equal(52.0, SensorJson.TryDeserialize(lines[1])!.Readings[0].Value);
+        Assert.Equal(53.0, SensorJson.TryDeserialize(lines[2])!.Readings[0].Value);
     }
 
     [Fact]
