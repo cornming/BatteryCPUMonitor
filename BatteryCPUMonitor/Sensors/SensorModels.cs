@@ -16,12 +16,14 @@ internal sealed record SensorReading(
 /// <summary>感測器服務每秒送出一則的訊息（一行 JSON）。</summary>
 /// <param name="Ok">服務是否順利初始化；失敗時 <paramref name="Error"/> 說明原因，服務仍會繼續回報（只是沒有數值）。</param>
 /// <param name="Hardware">偵測到的硬體名稱，供診斷與顯示狀態用。</param>
+/// <param name="Diagnostics">診斷資料。只在服務啟動後的第一則帶上，之後都是 null（內容見 <see cref="SensorDiagnostics"/>）。</param>
 internal sealed record SensorMessage(
     [property: JsonPropertyName("v")] int Version,
     [property: JsonPropertyName("ok")] bool Ok,
     [property: JsonPropertyName("error")] string? Error,
     [property: JsonPropertyName("hw")] List<string> Hardware,
-    [property: JsonPropertyName("readings")] List<SensorReading> Readings)
+    [property: JsonPropertyName("readings")] List<SensorReading> Readings,
+    [property: JsonPropertyName("diag"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SensorDiagnostics? Diagnostics = null)
 {
     public const int CurrentVersion = 1;
 
@@ -41,7 +43,15 @@ internal static class SensorJson
         try
         {
             SensorMessage? message = JsonSerializer.Deserialize<SensorMessage>(line, Options);
-            return message is { Hardware: not null, Readings: not null } ? message : null;
+            if (message is not { Hardware: not null, Readings: not null })
+            {
+                return null;
+            }
+
+            // 診斷資料是附帶的：內容不完整就丟掉它，不要連數值一起丟。
+            return message.Diagnostics is { Cpus: null } or { CpuSensors: null }
+                ? message with { Diagnostics = null }
+                : message;
         }
         catch (JsonException)
         {

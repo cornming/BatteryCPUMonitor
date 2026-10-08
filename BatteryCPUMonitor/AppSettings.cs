@@ -23,6 +23,11 @@ internal sealed class AppSettings
 
     public bool ClickThrough { get; set; }
 
+    /// <summary>
+    /// 隱藏整個橫條（浮動橫條與工作列上的小工具都不顯示）。程式與感測器照常執行，系統匣圖示仍在，隨時可以從選單再顯示。
+    /// </summary>
+    public bool BarHidden { get; set; }
+
     /// <summary>嵌入工作列（true）或浮動橫條（false）。</summary>
     public bool TaskbarMode { get; set; }
 

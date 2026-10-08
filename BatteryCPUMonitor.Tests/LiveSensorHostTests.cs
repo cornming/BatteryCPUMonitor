@@ -147,3 +147,46 @@ public class LiveSensorHostTests(ITestOutputHelper output)
         Assert.Equal(0, host.ExitCode);
     }
 }
+
+/// <summary>
+/// 在真的 Windows 上，讓真正的 LibreHardwareMonitor 來源蒐集一次診斷資料。
+/// 只在 GitHub Actions 上執行，建置主機的感測器很少，所以這裡驗證的是「蒐集得起來、結構完整」，不是「讀到哪些數值」。
+/// </summary>
+public class LiveSensorDiagnosticsTests(ITestOutputHelper output)
+{
+    private static bool NotOnCi => Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true";
+
+    [Fact]
+    public void 真正的來源_診斷資料只在第一則帶上_內容完整()
+    {
+        if (NotOnCi) { return; }
+
+        using var source = new LhmSensorSource();
+
+        SensorMessage first = source.Read();
+        SensorMessage second = source.Read();
+
+        Assert.True(first.Ok, first.Error);
+        SensorDiagnostics diagnostics = Assert.IsType<SensorDiagnostics>(first.Diagnostics);
+        Assert.Null(second.Diagnostics);
+
+        Assert.NotEqual("?", diagnostics.LibraryVersion);
+        Assert.NotNull(diagnostics.PawnIoInstalled);
+        foreach (CpuDiagnostics cpu in diagnostics.Cpus)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(cpu.Name));
+            Assert.False(string.IsNullOrWhiteSpace(cpu.LibraryClass));
+        }
+
+        // 診斷資料要能原樣走過管道上的 JSON，而且報告產得出來。
+        SensorMessage? parsed = SensorJson.TryDeserialize(SensorJson.Serialize(first));
+        Assert.NotNull(parsed?.Diagnostics);
+
+        var input = new DiagnosisInput(SensorState.Connected, string.Empty, SensorSelector.Select(first.Readings), parsed.Diagnostics, DriverServiceState.Unknown);
+        var environment = new ReportEnvironment(DateTimeOffset.Now, "test", "test", "test");
+        SensorDiagnosticsView view = SensorDiagnosticsReport.Build(input, environment);
+
+        output.WriteLine(view.Text);
+        Assert.Contains("■ 判斷", view.Text);
+    }
+}
