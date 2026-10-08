@@ -96,7 +96,7 @@ internal static class SensorHostProcess
         catch (Exception ex)
         {
             // 初始化失敗（例如驅動程式被安全軟體擋下）時仍然連線並說明原因，讓主程式顯示給使用者看。
-            return new FailedSensorSource(ex.Message);
+            return new FailedSensorSource(ex.Message, ex.ToString());
         }
     }
 
@@ -115,9 +115,21 @@ internal static class SensorHostProcess
         stop.Cancel();
     }
 
-    private sealed class FailedSensorSource(string error) : ISensorSource
+    private sealed class FailedSensorSource(string error, string detail) : ISensorSource
     {
-        public SensorMessage Read() => SensorMessage.Failure(error);
+        private bool _detailSent;
+
+        public SensorMessage Read()
+        {
+            SensorMessage failure = SensorMessage.Failure(error);
+            if (_detailSent)
+            {
+                return failure;
+            }
+
+            _detailSent = true;
+            return failure with { Diagnostics = SensorDiagnostics.ForInitFailure(SensorEnvironment.IsElevated(), detail) };
+        }
 
         public void Dispose()
         {

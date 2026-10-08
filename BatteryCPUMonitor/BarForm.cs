@@ -53,6 +53,7 @@ internal sealed class BarForm : Form
 
     private readonly ContextMenuStrip _menu = new();
     private readonly ToolStripMenuItem _autoStartItem = new("開機自動啟動");
+    private readonly ToolStripMenuItem _showBarItem = new("顯示橫條");
     private readonly ToolStripMenuItem _clickThroughItem = new("滑鼠穿透");
     private readonly ToolStripMenuItem _taskbarModeItem = new("嵌入工作列");
     private readonly ToolStripMenuItem _checkUpdateItem = new("檢查更新…");
@@ -81,6 +82,9 @@ internal sealed class BarForm : Form
     private readonly ToolStripMenuItem _sensorsReconnectItem = new("重新連線（需要系統管理員權限）");
     private readonly ToolStripMenuItem _sensorsStatusItem = new("狀態") { Enabled = false };
     private readonly ToolStripMenuItem _pawnIoItem = new("PawnIO…");
+    private readonly ToolStripMenuItem _sensorsDiagnoseItem = new("診斷資訊…");
+    private readonly ToolStripMenuItem _sensorsCopyDiagnosticsItem = new("複製診斷資訊");
+    private SensorDiagnosticsForm? _diagnosticsForm;
     private readonly SensorService _sensors = new(
         new ElevatedHostLauncher(),
         connectTimeout: TimeSpan.FromMinutes(3),
@@ -110,6 +114,9 @@ internal sealed class BarForm : Form
     private TaskbarForm? _taskbar;
     private bool _taskbarActive;
     private long _taskbarRetryAt;
+
+    // 浮動橫條現在該不該顯示：隱藏整個橫條，或已經嵌入工作列時都是 false。
+    private bool _barVisible = true;
 
     /// <summary>使用者拖曳後記下的錨點（橫條底邊中點）；沒拖過就是 null，跟著預設位置走。</summary>
     private Point? _userAnchor;
@@ -187,8 +194,8 @@ internal sealed class BarForm : Form
         _timer.Start();
     }
 
-    /// <summary>嵌入工作列期間，浮動橫條保持隱藏。</summary>
-    protected override void SetVisibleCore(bool value) => base.SetVisibleCore(value && !_taskbarActive);
+    /// <summary>嵌入工作列或隱藏橫條期間，浮動橫條保持隱藏。</summary>
+    protected override void SetVisibleCore(bool value) => base.SetVisibleCore(value && _barVisible);
 
     protected override CreateParams CreateParams
     {
@@ -213,6 +220,7 @@ internal sealed class BarForm : Form
             _timer.Dispose();
             _updateTimer.Dispose();
             _sensorPromptTimer.Dispose();
+            _diagnosticsForm?.Dispose();
             _sensors.Dispose(); // 特權的感測器服務偵測到斷線會自己結束
             ReleaseTaskbar(); // Windows 10 會在這裡把工作清單還原
             _collector.Dispose();
@@ -255,6 +263,8 @@ internal sealed class BarForm : Form
         _sensorsMenu.DropDownItems.Add(_sensorsReconnectItem);
         _sensorsMenu.DropDownItems.Add(new ToolStripSeparator());
         _sensorsMenu.DropDownItems.Add(_sensorsStatusItem);
+        _sensorsMenu.DropDownItems.Add(_sensorsDiagnoseItem);
+        _sensorsMenu.DropDownItems.Add(_sensorsCopyDiagnosticsItem);
         _sensorsMenu.DropDownItems.Add(new ToolStripSeparator());
         _sensorsMenu.DropDownItems.Add(_pawnIoItem);
 
@@ -281,8 +291,11 @@ internal sealed class BarForm : Form
         };
         _sensorsReconnectItem.Click += (_, _) => ReconnectSensors();
         _pawnIoItem.Click += (_, _) => ShowPawnIoHelp();
+        _sensorsDiagnoseItem.Click += (_, _) => ShowSensorDiagnostics();
+        _sensorsCopyDiagnosticsItem.Click += (_, _) => CopySensorDiagnostics();
 
         _autoStartItem.Click += (_, _) => AutoStart.SetEnabled(!AutoStart.IsEnabled());
+        _showBarItem.Click += (_, _) => SetBarHidden(!_settings.BarHidden);
         _clickThroughItem.Click += (_, _) => SetClickThrough(!_settings.ClickThrough);
         _taskbarModeItem.Click += (_, _) =>
         {
@@ -320,13 +333,14 @@ internal sealed class BarForm : Form
             _cpuTimeItem.Checked = _settings.CpuMode == CpuUsageMode.Time;
             _cpuUtilityItem.Checked = _settings.CpuMode == CpuUsageMode.Utility;
             _sensorsEnabledItem.Checked = _settings.SensorsEnabled;
-            _sensorsReconnectItem.Enabled = _settings.SensorsEnabled && _sensors.State is SensorState.Off or SensorState.Failed;
+            _sensorsReconnectItem.Enabled = _settings.SensorsEnabled && _sensors.State != SensorState.Starting; // 已連線時也能重來：PawnIO 是啟動後才裝的話，要重新啟動感測器服務才讀得到
             _sensorsStatusItem.Text = "狀態：" + SensorStatusText();
-            _pawnIoItem.Text = IsPawnIoInstalled() ? "PawnIO：已安裝（CPU 與主機板感測器可用）" : "安裝 PawnIO（CPU 與主機板感測器需要）…";
+            _pawnIoItem.Text = SensorEnvironment.IsPawnIoInstalled() ? "PawnIO：已安裝（CPU 與主機板感測器可用）" : "安裝 PawnIO（CPU 與主機板感測器需要）…";
             _autoStartItem.Checked = AutoStart.IsEnabled();
+            _showBarItem.Checked = !_settings.BarHidden;
             _clickThroughItem.Checked = _settings.ClickThrough;
             RefreshTaskbarMenu();
-            resetPosition.Enabled = !_taskbarActive;
+            resetPosition.Enabled = !_taskbarActive && !_settings.BarHidden;
 
             // 開發版，或不是用下載來的 exe 執行（例如用 dotnet 執行）時，不支援自動更新。
             bool canUpdate = UpdatePolicy.CanSelfUpdate(Environment.ProcessPath) && !UpdatePolicy.IsDevelopment(AppVersion.Current);
@@ -337,6 +351,7 @@ internal sealed class BarForm : Form
 
         _menu.Items.Add(new ToolStripMenuItem($"BatteryCPUMonitor v{Application.ProductVersion}") { Enabled = false });
         _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(_showBarItem);
         _menu.Items.Add(showItems);
         _menu.Items.Add(_cpuModeMenu);
         _menu.Items.Add(_taskbarModeItem);
@@ -364,6 +379,26 @@ internal sealed class BarForm : Form
         toggle(_settings);
         _settings.Save(_settingsPath);
         ApplyLayout();
+    }
+
+    /// <summary>
+    /// 顯示或隱藏整個橫條。隱藏時浮動橫條與工作列上的小工具都撤掉，但程式、感測器與系統匣圖示照常執行。
+    /// </summary>
+    private void SetBarHidden(bool hidden)
+    {
+        _settings.BarHidden = hidden;
+        _settings.Save(_settingsPath);
+        ApplyLayout();
+
+        if (hidden)
+        {
+            // 橫條不見了，提醒使用者要從哪裡叫回來。
+            _tray.ShowBalloonTip(
+                5000,
+                "橫條已隱藏",
+                "程式仍在背景執行。要再顯示，請在系統匣的電池圖示上按右鍵，勾選「顯示橫條」。",
+                ToolTipIcon.Info);
+        }
     }
 
     private void SetClickThrough(bool enabled)
@@ -562,6 +597,7 @@ internal sealed class BarForm : Form
     private void ReconnectSensors()
     {
         _sensorPromptActive = false;
+        _sensors.Stop(); // 已連線時先放掉舊的服務；沒連線時等於什麼都沒做
         _sensors.Start();
     }
 
@@ -620,42 +656,58 @@ internal sealed class BarForm : Form
             return _sensors.Status;
         }
 
-        SensorValues? values = _sensors.Latest;
-        if (values is null)
+        Diagnosis diagnosis = SensorDiagnosis.Evaluate(CurrentDiagnosisInput());
+        return diagnosis.Kind switch
         {
-            return "已連線，等待數值…";
-        }
-
-        if (values.CpuTemperature is null)
-        {
-            return IsPawnIoInstalled()
-                ? "已連線，但沒有取得 CPU 溫度（這台電腦可能不支援）"
-                : "已連線，但沒有取得 CPU 溫度（需要安裝 PawnIO）";
-        }
-
-        return "已連線";
+            DiagnosisKind.Working => "已連線",
+            DiagnosisKind.Waiting => "已連線，等待數值…",
+            _ => $"已連線，但沒有取得 CPU 溫度：{diagnosis.Headline}（見「診斷資訊」）",
+        };
     }
 
-    private static bool IsPawnIoInstalled()
+    private DiagnosisInput CurrentDiagnosisInput() =>
+        new(_sensors.State, _sensors.Status, _sensors.Latest, _sensors.HostDiagnostics, SensorEnvironment.QueryPawnIoService(), SensorEnvironment.IsPawnIoInstalled());
+
+    private SensorDiagnosticsView BuildSensorDiagnostics() =>
+        SensorDiagnosticsReport.Build(
+            CurrentDiagnosisInput(),
+            new ReportEnvironment(
+                DateTimeOffset.Now,
+                AppVersion.CurrentText,
+                SensorEnvironment.DescribeOperatingSystem(),
+                SensorEnvironment.ReadProcessor()));
+
+    private void ShowSensorDiagnostics()
     {
-        string? location = null;
-        try
+        if (_diagnosticsForm is { IsDisposed: false } open)
         {
-            using RegistryKey? key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO");
-            location = key?.GetValue("InstallLocation") as string;
-        }
-        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
-        {
-            // 讀不到就當作沒有登錄，下面還會檢查預設的安裝位置。
+            open.Activate();
+            return;
         }
 
-        return PawnIoDetector.IsInstalled(location, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), File.Exists);
+        _diagnosticsForm = new SensorDiagnosticsForm(BuildSensorDiagnostics, _icon);
+        _diagnosticsForm.FormClosed += (_, _) => _diagnosticsForm = null;
+        _diagnosticsForm.Show();
+    }
+
+    /// <summary>不開視窗，直接把診斷資訊放進剪貼簿。</summary>
+    private void CopySensorDiagnostics()
+    {
+        SensorDiagnosticsView view = BuildSensorDiagnostics();
+        if (SensorDiagnosticsForm.TryCopy(view.Text))
+        {
+            _tray.ShowBalloonTip(5000, "已複製診斷資訊", $"{view.Diagnosis.Headline}。可以直接貼上。", ToolTipIcon.Info);
+        }
+        else
+        {
+            _tray.ShowBalloonTip(6000, "複製失敗", "剪貼簿被其他程式占用，請稍後再試，或從「診斷資訊…」視窗複製。", ToolTipIcon.Warning);
+        }
     }
 
     /// <summary>說明 CPU 與主機板的感測器為什麼需要 PawnIO，並詢問要不要開啟官方網站。程式不會替使用者安裝驅動程式。</summary>
     private void ShowPawnIoHelp()
     {
-        string state = IsPawnIoInstalled()
+        string state = SensorEnvironment.IsPawnIoInstalled()
             ? "這台電腦已經偵測到 PawnIO。\n\n"
             : "這台電腦還沒有偵測到 PawnIO。\n\n";
 
@@ -857,7 +909,8 @@ internal sealed class BarForm : Form
     {
         IReadOnlyList<BarColumn> columns = BarContent.Build(_snapshot, _settings.Visible);
 
-        bool useTaskbar = _settings.TaskbarMode && EnsureTaskbar();
+        // 隱藏時連工作列上的小工具也撤掉；再顯示時會重新嵌入。
+        bool useTaskbar = !_settings.BarHidden && _settings.TaskbarMode && EnsureTaskbar();
         if (useTaskbar)
         {
             _taskbar!.UpdateContent(columns, _settings.ClickThrough);
@@ -867,13 +920,16 @@ internal sealed class BarForm : Form
             ReleaseTaskbar();
         }
 
-        if (_taskbarActive != useTaskbar)
+        _taskbarActive = useTaskbar;
+
+        bool showFloating = !_settings.BarHidden && !useTaskbar;
+        if (_barVisible != showFloating)
         {
-            _taskbarActive = useTaskbar;
-            Visible = !useTaskbar;
+            _barVisible = showFloating;
+            Visible = showFloating;
         }
 
-        if (useTaskbar)
+        if (!showFloating)
         {
             return;
         }

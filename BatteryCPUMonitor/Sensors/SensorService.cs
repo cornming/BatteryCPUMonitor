@@ -46,6 +46,7 @@ internal sealed class SensorService : IDisposable
     private string _status = string.Empty;
     private SensorValues? _latest;
     private SensorMessage? _lastMessage;
+    private SensorDiagnostics? _diagnostics;
     private long _lastMessageTick;
 
     /// <param name="connectTimeout">啟動後最多等多久連上管道（要包含使用者按下同意的時間）。</param>
@@ -93,6 +94,15 @@ internal sealed class SensorService : IDisposable
         get { lock (_gate) { return _lastMessage?.Hardware ?? []; } }
     }
 
+    /// <summary>
+    /// 感測器服務啟動後送來的診斷資料（第一則訊息帶的）。服務沒起來、還在初始化，或重新啟動後還沒收到時為 null。
+    /// 連線中斷後仍然保留，方便查原因；重新啟動或停止時清掉。
+    /// </summary>
+    public SensorDiagnostics? HostDiagnostics
+    {
+        get { lock (_gate) { return _diagnostics; } }
+    }
+
     /// <summary>要求啟動。已經在啟動中或已連線時不會重複啟動。立即返回，後續在背景進行。</summary>
     public void Start()
     {
@@ -106,6 +116,7 @@ internal sealed class SensorService : IDisposable
 
             _cts?.Dispose();
             _cts = cts = new CancellationTokenSource();
+            _diagnostics = null; // 上一次的診斷資料不能拿來解釋這一次
             Set(SensorState.Starting, "等待系統管理員權限與感測器初始化…");
         }
 
@@ -120,6 +131,7 @@ internal sealed class SensorService : IDisposable
             _cts?.Cancel();
             _latest = null;
             _lastMessage = null;
+            _diagnostics = null;
         }
 
         Set(SensorState.Off, string.Empty);
@@ -194,6 +206,7 @@ internal sealed class SensorService : IDisposable
         lock (_gate)
         {
             _lastMessage = message;
+            _diagnostics = message.Diagnostics ?? _diagnostics;
             _latest = SensorSelector.Select(message.Readings);
             _lastMessageTick = Environment.TickCount64;
         }

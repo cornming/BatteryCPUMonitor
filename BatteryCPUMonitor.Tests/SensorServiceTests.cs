@@ -279,6 +279,60 @@ public class SensorServiceTests
         }
     }
 
+    private static SensorDiagnostics SampleDiagnostics() =>
+        new("0.9.6.0", true, true, "2.2.0.0", [], [], null);
+
+    [Fact]
+    public async Task 第一則訊息帶的診斷資料_之後的訊息沒帶也會保留()
+    {
+        using var launcher = new FakeLauncher(NormalHost(n => n == 1 ? CpuTemp(57) with { Diagnostics = SampleDiagnostics() } : CpuTemp(57)));
+        using SensorService service = Service(launcher);
+
+        service.Start();
+        await WaitUntil(() => service.HostDiagnostics is not null, "收到診斷資料");
+        await Task.Delay(200); // 讓後面不帶診斷資料的訊息也進來
+
+        Assert.Equal("0.9.6.0", service.HostDiagnostics!.LibraryVersion);
+    }
+
+    [Fact]
+    public async Task 停止之後診斷資料清空()
+    {
+        using var launcher = new FakeLauncher(NormalHost(_ => CpuTemp(57) with { Diagnostics = SampleDiagnostics() }));
+        using SensorService service = Service(launcher);
+        service.Start();
+        await WaitUntil(() => service.HostDiagnostics is not null, "收到診斷資料");
+
+        service.Stop();
+
+        Assert.Null(service.HostDiagnostics);
+    }
+
+    [Fact]
+    public async Task 連線中斷後仍保留診斷資料_重新啟動時清掉_不拿舊的解釋新的()
+    {
+        // 只有第一次啟動會有服務端；第二次沒有任何人建立管道，狀態會停在「啟動中」。
+        var normal = NormalHost(_ => CpuTemp(57) with { Diagnostics = SampleDiagnostics() }, stopAfterMessages: 2);
+        int launches = 0;
+        using var launcher = new FakeLauncher((pipe, token) =>
+        {
+            if (Interlocked.Increment(ref launches) == 1)
+            {
+                normal(pipe, token);
+            }
+        });
+        using SensorService service = Service(launcher);
+        service.Start();
+        await WaitUntil(() => service.State == SensorState.Failed, "服務結束");
+
+        Assert.NotNull(service.HostDiagnostics); // 失敗之後還看得到上一次的內容，方便查原因
+
+        service.Start();
+        await WaitUntil(() => service.State == SensorState.Starting, "重新啟動");
+
+        Assert.Null(service.HostDiagnostics);
+    }
+
     [Fact]
     public void 還沒啟動時什麼都沒有()
     {

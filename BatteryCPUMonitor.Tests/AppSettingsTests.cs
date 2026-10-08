@@ -40,6 +40,25 @@ public class AppSettingsTests : IDisposable
     }
 
     [Fact]
+    public void 橫條預設是顯示的_隱藏後存檔再讀取仍是隱藏()
+    {
+        Assert.False(AppSettings.Load(SettingsPath).BarHidden);
+
+        new AppSettings { BarHidden = true }.Save(SettingsPath);
+
+        Assert.True(AppSettings.Load(SettingsPath).BarHidden);
+    }
+
+    [Fact]
+    public void 舊版設定檔沒有橫條隱藏欄位_讀取後橫條照常顯示()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+        File.WriteAllText(SettingsPath, "{ \"anchorX\": 100, \"anchorY\": 200, \"clickThrough\": true }");
+
+        Assert.False(AppSettings.Load(SettingsPath).BarHidden);
+    }
+
+    [Fact]
     public void 重設位置後_錨點清空()
     {
         var settings = new AppSettings { Anchor = new Point(10, 20) };
