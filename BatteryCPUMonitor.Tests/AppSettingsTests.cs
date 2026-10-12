@@ -59,6 +59,28 @@ public class AppSettingsTests : IDisposable
     }
 
     [Fact]
+    public void 更新預設會先詢問_舊版設定檔升級後也一樣()
+    {
+        Assert.False(AppSettings.Load(SettingsPath).UpdateWithoutAsking);
+
+        // 舊版的「自動更新」是直接安裝；沒有這個欄位的設定檔，升級後改成先詢問。
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+        File.WriteAllText(SettingsPath, "{ \"autoUpdate\": true }");
+
+        AppSettings settings = AppSettings.Load(SettingsPath);
+        Assert.True(settings.AutoUpdate);
+        Assert.False(settings.UpdateWithoutAsking);
+    }
+
+    [Fact]
+    public void 選擇不詢問直接更新_存檔後再讀取仍然記得()
+    {
+        new AppSettings { UpdateWithoutAsking = true }.Save(SettingsPath);
+
+        Assert.True(AppSettings.Load(SettingsPath).UpdateWithoutAsking);
+    }
+
+    [Fact]
     public void 重設位置後_錨點清空()
     {
         var settings = new AppSettings { Anchor = new Point(10, 20) };

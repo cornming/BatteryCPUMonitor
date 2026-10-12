@@ -57,7 +57,11 @@ internal sealed class BarForm : Form
     private readonly ToolStripMenuItem _clickThroughItem = new("滑鼠穿透");
     private readonly ToolStripMenuItem _taskbarModeItem = new("嵌入工作列");
     private readonly ToolStripMenuItem _checkUpdateItem = new("檢查更新…");
-    private readonly ToolStripMenuItem _autoUpdateItem = new("自動更新");
+    private readonly ToolStripMenuItem _autoUpdateItem = new("自動檢查更新");
+    private readonly ToolStripMenuItem _askBeforeUpdateItem = new("更新前先詢問我")
+    {
+        ToolTipText = "有新版本時先顯示更新內容並詢問。取消勾選就改成直接在背景下載、安裝並重新啟動。",
+    };
     private readonly ToolStripMenuItem _showBatteryItem = new("電池");
     private readonly ToolStripMenuItem _showBatteryDetailItem = new("電池詳情（功耗、健康度）");
     private readonly ToolStripMenuItem _showCpuRamItem = new("CPU 與記憶體");
@@ -109,6 +113,9 @@ internal sealed class BarForm : Form
 
     private UpdateController? _updater;
     private bool _updating;
+
+    // 這次執行期間，使用者回答過「不更新」的版本：自動檢查不會一直問同一個版本。
+    private Version? _declinedVersion;
 
     // 嵌入工作列用的小工具；只有在「嵌入工作列」開啟而且成功掛上時才存在。
     private TaskbarForm? _taskbar;
@@ -312,6 +319,11 @@ internal sealed class BarForm : Form
             _settings.AutoUpdate = !_settings.AutoUpdate;
             _settings.Save(_settingsPath);
         };
+        _askBeforeUpdateItem.Click += (_, _) =>
+        {
+            _settings.UpdateWithoutAsking = !_settings.UpdateWithoutAsking;
+            _settings.Save(_settingsPath);
+        };
         close.Click += (_, _) => Close();
 
         // 每次開啟選單時才讀取實際狀態，勾選永遠反映現況。
@@ -347,6 +359,8 @@ internal sealed class BarForm : Form
             _checkUpdateItem.Enabled = canUpdate && !_updating;
             _autoUpdateItem.Enabled = canUpdate;
             _autoUpdateItem.Checked = _settings.AutoUpdate;
+            _askBeforeUpdateItem.Enabled = canUpdate && _settings.AutoUpdate;
+            _askBeforeUpdateItem.Checked = !_settings.UpdateWithoutAsking;
         };
 
         _menu.Items.Add(new ToolStripMenuItem($"BatteryCPUMonitor v{Application.ProductVersion}") { Enabled = false });
@@ -363,6 +377,7 @@ internal sealed class BarForm : Form
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_checkUpdateItem);
         _menu.Items.Add(_autoUpdateItem);
+        _menu.Items.Add(_askBeforeUpdateItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(close);
     }
@@ -742,7 +757,8 @@ internal sealed class BarForm : Form
 
     /// <summary>
     /// 檢查更新，有新版本就下載、安裝，並重新啟動。
-    /// 手動檢查（<paramref name="interactive"/>）會顯示結果並在安裝前徵求同意；自動檢查只在真的要更新時用通知告知，其餘靜悄悄。
+    /// 手動檢查（<paramref name="interactive"/>）一定會顯示結果並在安裝前徵求同意；
+    /// 自動檢查找到新版本時，預設也會先詢問，設定成「不詢問」才直接在背景安裝，其餘情況（沒有新版本、查詢失敗）靜悄悄。
     /// </summary>
     private async Task RunUpdateAsync(bool interactive)
     {
@@ -752,6 +768,7 @@ internal sealed class BarForm : Form
         }
 
         _updating = true;
+        bool dialogs = interactive; // 這一輪有沒有跟使用者對話：有的話，結果也用視窗告知，不用通知
         try
         {
             UpdateCheck check = await Updater.CheckAsync(CancellationToken.None);
@@ -771,7 +788,14 @@ internal sealed class BarForm : Form
             LatestRelease release = check.Release!;
             string latest = AppVersion.Display(release.Version);
 
-            if (interactive)
+            UpdateAction action = UpdatePrompt.Decide(interactive, _settings.UpdateWithoutAsking, release.Version, _declinedVersion);
+            if (action == UpdateAction.Skip)
+            {
+                return;
+            }
+
+            dialogs = action == UpdateAction.Ask;
+            if (dialogs)
             {
                 string notes = release.Notes.Length > 0 ? "\n\n" + release.Notes : string.Empty;
                 DialogResult answer = MessageBox.Show(
@@ -781,6 +805,7 @@ internal sealed class BarForm : Form
                     MessageBoxIcon.Question);
                 if (answer != DialogResult.Yes)
                 {
+                    _declinedVersion = release.Version; // 手動檢查不受影響，下次啟動也會再問
                     return;
                 }
             }
@@ -797,7 +822,7 @@ internal sealed class BarForm : Form
             string text = result.Status == InstallStatus.Installed
                 ? $"已更新到 v{latest}，但無法自動重新啟動，請手動重新開啟程式。"
                 : $"更新失敗：{result.Message}";
-            if (interactive)
+            if (dialogs)
             {
                 MessageBox.Show(text, DialogCaption, MessageBoxButtons.OK, result.Status == InstallStatus.Installed ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
@@ -809,7 +834,7 @@ internal sealed class BarForm : Form
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // 更新是附加功能，無論哪裡出了意料之外的狀況，都不能讓監控程式本身跟著當掉。
-            if (interactive)
+            if (dialogs)
             {
                 MessageBox.Show($"檢查更新時發生未預期的錯誤：{ex.Message}", DialogCaption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }

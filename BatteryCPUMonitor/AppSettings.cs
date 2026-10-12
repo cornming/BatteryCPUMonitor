@@ -31,8 +31,14 @@ internal sealed class AppSettings
     /// <summary>嵌入工作列（true）或浮動橫條（false）。</summary>
     public bool TaskbarMode { get; set; }
 
-    /// <summary>自動檢查更新，有新版本時自動下載並安裝（預設開啟）。</summary>
+    /// <summary>自動檢查更新（預設開啟）。找到新版本時預設先詢問使用者，見 <see cref="UpdateWithoutAsking"/>。</summary>
     public bool AutoUpdate { get; set; } = true;
+
+    /// <summary>
+    /// 自動檢查到新版本時，不詢問、直接在背景下載安裝（預設 false：先詢問）。
+    /// 舊版的設定檔沒有這個欄位，讀取後維持預設值，所以原本會自動更新的人，升級之後會改成先詢問。
+    /// </summary>
+    public bool UpdateWithoutAsking { get; set; }
 
     /// <summary>
     /// 嵌入哪個螢幕的工作列（螢幕的裝置名稱）；null 表示主螢幕。
