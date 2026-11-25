@@ -41,6 +41,7 @@
 | --- | --- |
 | 顯示橫條 | 勾選時顯示橫條（預設）；取消勾選就把整個橫條隱藏，不論是浮動橫條或嵌入工作列的小工具都會撤掉。隱藏只是看不到，程式、硬體感測器與系統匣圖示照常執行，要再顯示就到系統匣圖示的選單重新勾選。這個設定會記住 |
 | 顯示項目 | 勾選要顯示的欄位：電池、電池詳情、CPU 與記憶體、GPU 與顯示記憶體、磁碟讀寫、網路速度，以及溫度、頻率、功耗、風扇（後四項預設關閉）。這台電腦沒有的硬體會呈現灰色無法勾選 |
+| 外觀風格 | 切換三種科技儀表風格：「曜石儀表」（預設：左側狀態導軌＋極細微進度條）、「航電矩陣」（四角校準框線＋8 格 LED＋即時 CPU 波形圖）、「極簡雙色」（幾何星芒＋標籤旁微色條）；並可選擇「暖曜黑」、「暖象牙白」或「跟隨 Windows 主題」，浮動橫條、工作列小工具、右鍵選單與診斷視窗同步套用 |
 | CPU 使用率算法 | 切換 CPU 使用率的算法：「依忙碌時間」（預設）或「依處理器效能」。與工作管理員的數字對不上時可以換另一種，詳見下方「CPU 使用率為什麼和工作管理員不一樣」 |
 | 硬體感測器 | 啟用或停用選用的硬體感測器，顯示目前的連線狀態與 PawnIO 的偵測結果，並可開啟「診斷資訊」或一鍵複製。詳見下方「硬體感測器（選用）」 |
 | 嵌入工作列 | 把內容直接顯示在工作列上、系統匣的左邊，浮動橫條會隱藏。只有一個螢幕時再點一次切回浮動橫條；有多個螢幕時會展開子選單，可以選要嵌入哪個螢幕的工作列。詳見下方「嵌入工作列」 |
@@ -234,7 +235,7 @@ CPU 溫度、CPU 功耗、主機板上的風扇，必須透過核心驅動程式
 | 磁碟讀取、寫入 | 低於 10 MB/s | 10–100 MB/s | 100 MB/s 以上 |
 | 網路上傳、下載 | 低於 1 MB/s | 1–10 MB/s | 10 MB/s 以上 |
 
-只要接著電源，電量一律顯示綠色。磁碟與網路的顏色不是警報，而是讓人一眼看出有東西正在大量讀寫或傳輸。
+只要接著電源，電量一律顯示綠色。功耗、顯存、頻率與風扇這類純資訊讀數以鋼青藍色呈現；磁碟與網路的顏色不是警報，而是讓人一眼看出有東西正在大量讀寫或傳輸。
 
 ### CPU 使用率為什麼和工作管理員不一樣
 
@@ -251,7 +252,7 @@ CPU 溫度、CPU 功耗、主機板上的風扇，必須透過核心驅動程式
 
 | 位置 | 內容 |
 | --- | --- |
-| `%AppData%\BatteryCPUMonitor\settings.json` | 橫條位置、橫條是否隱藏、滑鼠穿透與嵌入工作列的開關、嵌入哪個螢幕、自動檢查更新與更新前是否詢問的開關、CPU 使用率算法、要顯示的項目 |
+| `%AppData%\BatteryCPUMonitor\settings.json` | 橫條位置、橫條是否隱藏、滑鼠穿透與嵌入工作列的開關、嵌入哪個螢幕、外觀風格與深淺主題、自動檢查更新與更新前是否詢問的開關、CPU 使用率算法、要顯示的項目 |
 | 執行檔旁邊的 `.old`、`.update.exe` | 更新過程中暫時產生，下次啟動或更新結束時自動刪除 |
 | 登錄機碼 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `BatteryCPUMonitor` | 只有勾選「開機自動啟動」時才會寫入，取消勾選即移除 |
 
@@ -275,7 +276,13 @@ dotnet publish BatteryCPUMonitor/BatteryCPUMonitor.csproj -c Release -r win-x64 
 
 | 路徑 | 內容 |
 | --- | --- |
-| `BatteryCPUMonitor/BarForm.cs` | 浮動橫條與主控：繪製、拖曳、選單、系統匣、每秒更新 |
+| `BatteryCPUMonitor/BarForm.cs` | 浮動橫條與主控：拖曳、選單、系統匣、每秒更新 |
+| `BatteryCPUMonitor/BarRenderer.cs` | 三種視覺風格（曜石儀表、航電矩陣、極簡雙色）的 GDI／GDI+ 繪製 |
+| `BatteryCPUMonitor/Appearance.cs` | 外觀風格、深淺主題色票、數值單位拆分與即時波形歷史（純計算） |
+| `BatteryCPUMonitor/ThemeFonts.cs` | 雙字體配對（人本無襯線標籤＋等寬數值）與高 DPI 縮放 |
+| `BatteryCPUMonitor/ThemedMenuRenderer.cs` | 與深淺主題一致的自訂右鍵選單渲染器 |
+| `BatteryCPUMonitor/WindowChrome.cs` | Windows 11 DWM 原生圓角、邊框色、標題列深淺色與系統主題讀取 |
+| `BatteryCPUMonitor/SensorDiagnosticsForm.cs` | 硬體感測器診斷視窗（同步套用深淺主題） |
 | `BatteryCPUMonitor/TaskbarForm.cs` | 嵌入工作列的小工具 |
 | `BatteryCPUMonitor/TaskbarPlacement.cs` | 嵌入工作列時的位置計算（純計算） |
 | `BatteryCPUMonitor/TaskbarTargets.cs` | 決定嵌入哪個螢幕的工作列、產生選單選項（純計算） |

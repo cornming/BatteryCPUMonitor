@@ -8,6 +8,9 @@ public enum Level
     /// <summary>不帶狀態的文字（分隔符號、尚無數值）。</summary>
     Neutral,
 
+    /// <summary>純資訊數值（功耗、顯存、頻率、風扇），不代表警示狀態。</summary>
+    Info,
+
     /// <summary>正常，綠色。</summary>
     Good,
 

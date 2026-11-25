@@ -82,6 +82,28 @@ internal sealed class AppSettings
     /// <summary>啟用硬體感測器（CPU、GPU 溫度、功耗、風扇）。需要系統管理員權限，每次啟動程式都要重新同意。</summary>
     public bool SensorsEnabled { get; set; }
 
+    /// <summary>橫條外觀風格（obsidian、hud 或 editorial）。舊版設定檔缺少時預設為曜石儀表。</summary>
+    [JsonPropertyName("visualStyle")]
+    public string VisualStyleName { get; set; } = BarVisualStyles.ObsidianName;
+
+    [JsonIgnore]
+    public BarVisualStyle VisualStyle
+    {
+        get => BarVisualStyles.Parse(VisualStyleName);
+        set => VisualStyleName = BarVisualStyles.ToText(value);
+    }
+
+    /// <summary>深淺主題模式（dark、light 或 system）。舊版設定檔缺少時預設為暖曜黑。</summary>
+    [JsonPropertyName("themeMode")]
+    public string ThemeModeName { get; set; } = ThemeModes.DarkName;
+
+    [JsonIgnore]
+    public ThemeMode Theme
+    {
+        get => ThemeModes.Parse(ThemeModeName);
+        set => ThemeModeName = ThemeModes.ToText(value);
+    }
+
     [JsonIgnore]
     public VisibleItems Visible => new(
         ShowBattery, ShowBatteryDetail, ShowCpuRam, ShowGpu, ShowDisk, ShowNetwork,

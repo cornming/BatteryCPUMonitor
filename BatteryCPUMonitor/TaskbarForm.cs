@@ -34,32 +34,13 @@ internal sealed class TaskbarForm : Form
 
     private const int Windows11FirstBuild = 22000;
 
-    private const TextFormatFlags TextFlags =
-        TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+    private const TextFormatFlags TextFlags = BarRenderer.TextFlags;
 
     private static readonly Size Unbounded = new(int.MaxValue, int.MaxValue);
-    private static readonly float[] FontCandidates = [9f, 8.5f, 8f, 7.5f, 7f];
-
-    // 色鍵要接近工作列的底色，文字邊緣的半透明像素才不會出現明顯的色邊。
-    private static readonly Color DarkKey = Color.FromArgb(40, 40, 41);
-    private static readonly Color LightKey = Color.FromArgb(210, 210, 211);
-
-    private static readonly Palette DarkPalette = new(
-        Label: Color.FromArgb(255, 255, 255),
-        Neutral: Color.FromArgb(190, 190, 190),
-        Good: Color.FromArgb(102, 255, 153),
-        Warn: Color.FromArgb(255, 214, 102),
-        Critical: Color.FromArgb(255, 105, 97));
-
-    private static readonly Palette LightPalette = new(
-        Label: Color.FromArgb(20, 20, 20),
-        Neutral: Color.FromArgb(95, 95, 95),
-        Good: Color.FromArgb(0, 128, 64),
-        Warn: Color.FromArgb(176, 112, 0),
-        Critical: Color.FromArgb(196, 43, 28));
+    private static readonly float[] FontCandidates = [8.75f, 8.25f, 7.75f, 7.25f, 6.75f];
 
     private readonly Action _showMenu;
-    private readonly bool _isWindows11 = Environment.OSVersion.Version.Build >= Windows11FirstBuild;
+    private readonly bool _isWindows11 = WindowChrome.IsWindows11;
 
     private ScreenInfo _target;
     private IntPtr _taskbar;
@@ -67,14 +48,20 @@ internal sealed class TaskbarForm : Form
     private IntPtr _taskList;  // 只有 Windows 10 會用到
     private bool _taskListSqueezed;
 
-    private Font? _font;
+    private ThemeFontSet? _fonts;
     private float _fontPoints;
     private int _fontDpi;
     private int _fontFitHeight;
+    private BarVisualStyle _fontFitStyle;
+    private bool _metersVisible = true;
 
-    private GridResult _layout = new(Size.Empty, []);
+    private StyledGridResult _layout = new(Size.Empty, Rectangle.Empty, [], []);
+    private BarVisualStyle _style = BarVisualStyle.Obsidian;
+    private Level _overallLevel = Level.Neutral;
+    private IReadOnlyList<double> _cpuHistory = [];
+    private bool _pulseBright = true;
     private bool? _lightTheme;
-    private Palette _palette = DarkPalette;
+    private ThemePalette _palette = BarTheme.TaskbarDark;
     private bool _clickThrough;
     private bool? _widgetsInstalled;
 
@@ -88,7 +75,7 @@ internal sealed class TaskbarForm : Form
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         ShowInTaskbar = false;
-        BackColor = DarkKey;
+        BackColor = BarTheme.TaskbarDarkKey;
         Bounds = new Rectangle(-32000, -32000, 1, 1); // 掛上工作列之前先放在畫面外
         SetStyle(
             ControlStyles.UserPaint
@@ -225,21 +212,40 @@ internal sealed class TaskbarForm : Form
     }
 
     /// <summary>更新內容並重新定位。工作列的配置隨時會變（通知圖示增減等），所以每次都重算位置。</summary>
-    public void UpdateContent(IReadOnlyList<BarColumn> columns, bool clickThrough)
+    public void UpdateContent(
+        IReadOnlyList<BarColumn> columns,
+        bool clickThrough,
+        BarVisualStyle style = BarVisualStyle.Obsidian,
+        IReadOnlyList<double>? cpuHistory = null,
+        bool pulseBright = true)
     {
         if (!IsAttached || !TryGetRect(_container, out Rectangle container))
         {
             return;
         }
 
+        _style = style;
+        _overallLevel = BarTheme.OverallLevel(columns);
+        _cpuHistory = cpuHistory ?? [];
+        _pulseBright = pulseBright;
+
         ApplyTheme();
         SetClickThrough(clickThrough);
 
         int dpi = GetTaskbarDpi();
-        EnsureFont(dpi, container.Height);
+        EnsureFonts(dpi, container.Height, style);
 
-        GridSpacing spacing = GridSpacing.ForDpi(dpi) with { PaddingY = 0, PaddingX = Scale(4, dpi) };
-        _layout = GridLayout.Compute(columns, MeasureWidth, RowHeight(_font!), spacing);
+        StyledGridMetrics metrics = StyledGridMetrics.For(style, dpi, taskbar: true);
+        if (!_metersVisible)
+        {
+            metrics = metrics.WithoutMeters();
+        }
+
+        int labelHeight = TextRenderer.MeasureText("電A", _fonts!.Label, Unbounded, TextFlags).Height;
+        int valueHeight = TextRenderer.MeasureText("00", _fonts.Value, Unbounded, TextFlags).Height;
+        int unitHeight = TextRenderer.MeasureText("%W", _fonts.Unit, Unbounded, TextFlags).Height;
+
+        _layout = GridLayout.ComputeStyled(columns, MeasureLabel, MeasureValue, MeasureUnit, labelHeight, valueHeight, unitHeight, metrics);
 
         Rectangle target;
         if (_isWindows11)
@@ -284,7 +290,7 @@ internal sealed class TaskbarForm : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        if (_font is null)
+        if (_fonts is null)
         {
             return;
         }
@@ -292,11 +298,17 @@ internal sealed class TaskbarForm : Form
         // 內容在工作列的高度內垂直置中。
         int offsetY = Math.Max(0, (ClientSize.Height - _layout.Size.Height) / 2);
 
-        foreach (TextRun run in _layout.Runs)
-        {
-            Color color = run.Level is Level level ? _palette.For(level) : _palette.Label;
-            TextRenderer.DrawText(e.Graphics, run.Text, _font, new Point(run.X, offsetY + run.Y), color, BackColor, TextFlags);
-        }
+        BarRenderer.PaintTaskbar(
+            e.Graphics,
+            offsetY,
+            _layout,
+            _fonts,
+            _palette,
+            _style,
+            _overallLevel,
+            _cpuHistory,
+            _pulseBright,
+            BackColor);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -313,8 +325,8 @@ internal sealed class TaskbarForm : Form
         if (disposing)
         {
             RestoreTaskList();
-            _font?.Dispose();
-            _font = null;
+            _fonts?.Dispose();
+            _fonts = null;
         }
 
         base.Dispose(disposing);
@@ -342,15 +354,15 @@ internal sealed class TaskbarForm : Form
     /// <summary>依工作列是深色或淺色，切換文字配色與色鍵。</summary>
     private void ApplyTheme()
     {
-        bool light = IsTaskbarLight();
+        bool light = WindowChrome.IsSystemTaskbarLight();
         if (_lightTheme == light)
         {
             return;
         }
 
         _lightTheme = light;
-        _palette = light ? LightPalette : DarkPalette;
-        Color key = light ? LightKey : DarkKey;
+        _palette = BarTheme.ForTaskbar(light);
+        Color key = light ? BarTheme.TaskbarLightKey : BarTheme.TaskbarDarkKey;
         BackColor = key;
 
         if (IsHandleCreated)
@@ -372,39 +384,58 @@ internal sealed class TaskbarForm : Form
         SetWindowLongW(Handle, GWL_EXSTYLE, enabled ? exStyle | WS_EX_TRANSPARENT : exStyle & ~WS_EX_TRANSPARENT);
     }
 
-    private void EnsureFont(int dpi, int availableHeight)
+    private void EnsureFonts(int dpi, int availableHeight, BarVisualStyle style)
     {
-        if (_font is not null && dpi == _fontDpi && availableHeight == _fontFitHeight)
+        if (_fonts is not null && dpi == _fontDpi && availableHeight == _fontFitHeight && style == _fontFitStyle)
         {
             return;
         }
 
-        int rowGap = GridSpacing.ForDpi(dpi).RowGap;
+        StyledGridMetrics metrics = StyledGridMetrics.For(style, dpi, taskbar: true);
+        int extraPerRow = metrics.MeterHeight > 0 ? metrics.MeterGap + metrics.MeterHeight : 0;
+        int maxAllowed = availableHeight - Scale(2, dpi);
+
+        // 先試著在保留微進度條的情況下挑最大字級；真的塞不下（例如極矮工作列）再收起微進度條。
+        bool showMeters = metrics.MeterHeight > 0;
         float points = TaskbarPlacement.FitFontPoints(
             FontCandidates,
-            candidate =>
-            {
-                using Font probe = CreateFont(candidate, dpi);
-                return RowHeight(probe);
-            },
-            rowGap,
-            availableHeight - Scale(2, dpi));
+            candidate => SlotHeightFor(candidate, dpi, extraPerRow),
+            metrics.RowGap,
+            maxAllowed);
 
-        if (_font is null || points != _fontPoints || dpi != _fontDpi)
+        if (showMeters && SlotHeightFor(points, dpi, extraPerRow) * 2 + metrics.RowGap > maxAllowed)
         {
-            _font?.Dispose();
-            _font = CreateFont(points, dpi);
+            showMeters = false;
+            points = TaskbarPlacement.FitFontPoints(
+                FontCandidates,
+                candidate => SlotHeightFor(candidate, dpi, 0),
+                metrics.RowGap,
+                maxAllowed);
         }
 
-        (_fontPoints, _fontDpi, _fontFitHeight) = (points, dpi, availableHeight);
+        if (_fonts is null || points != _fontPoints || dpi != _fontDpi)
+        {
+            _fonts?.Dispose();
+            _fonts = ThemeFontSet.Create(points, dpi);
+        }
+
+        _metersVisible = showMeters;
+        (_fontPoints, _fontDpi, _fontFitHeight, _fontFitStyle) = (points, dpi, availableHeight, style);
     }
 
-    private static Font CreateFont(float points, int dpi) =>
-        new(FontFamily.GenericSansSerif, points * dpi / 72f, FontStyle.Bold, GraphicsUnit.Pixel);
+    private static int SlotHeightFor(float points, int dpi, int extraPerRow)
+    {
+        using ThemeFontSet probe = ThemeFontSet.Create(points, dpi);
+        int labelH = TextRenderer.MeasureText("電A", probe.Label, Unbounded, TextFlags).Height;
+        int valueH = TextRenderer.MeasureText("00", probe.Value, Unbounded, TextFlags).Height;
+        return Math.Max(labelH, valueH) + extraPerRow;
+    }
 
-    private static int RowHeight(Font font) => TextRenderer.MeasureText("電0", font, Unbounded, TextFlags).Height;
+    private int MeasureLabel(string text) => TextRenderer.MeasureText(text, _fonts!.Label, Unbounded, TextFlags).Width;
 
-    private int MeasureWidth(string text) => TextRenderer.MeasureText(text, _font!, Unbounded, TextFlags).Width;
+    private int MeasureValue(string text) => TextRenderer.MeasureText(text, _fonts!.Value, Unbounded, TextFlags).Width;
+
+    private int MeasureUnit(string text) => TextRenderer.MeasureText(text, _fonts!.Unit, Unbounded, TextFlags).Width;
 
     private static int Scale(int pixelsAt96, int dpi) => (int)Math.Round(pixelsAt96 * dpi / 96.0, MidpointRounding.AwayFromZero);
 
@@ -422,10 +453,6 @@ internal sealed class TaskbarForm : Form
     }
 
     // ---- 讀取 Windows 的設定 ----
-
-    /// <summary>工作列跟著「Windows 模式」的深淺色走。</summary>
-    private static bool IsTaskbarLight() =>
-        ReadDword(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme") == 1;
 
     /// <summary>
     /// Windows 11 的工作列靠左對齊時，「小工具」（天氣）按鈕會跑到系統匣的左邊，需要避開。
@@ -484,17 +511,6 @@ internal sealed class TaskbarForm : Form
 
         rectangle = Rectangle.Empty;
         return false;
-    }
-
-    private sealed record Palette(Color Label, Color Neutral, Color Good, Color Warn, Color Critical)
-    {
-        public Color For(Level level) => level switch
-        {
-            Level.Good => Good,
-            Level.Warn => Warn,
-            Level.Critical => Critical,
-            _ => Neutral,
-        };
     }
 
     [StructLayout(LayoutKind.Sequential)]

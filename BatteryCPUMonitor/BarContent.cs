@@ -11,7 +11,14 @@ internal readonly record struct BarCell(string Label, string Value, Level Level)
 /// <param name="ValueTemplate">
 /// 用來預留數值寬度的範本字串（例如「100%」），數字位數變動時欄寬才不會跟著跳動。
 /// </param>
-internal readonly record struct BarColumn(BarCell Top, BarCell Bottom, string ValueTemplate);
+/// <param name="TopRatio">上格若為有界指標（百分比或溫度），對應 0–1 的進度比例，供微進度條或 LED 條顯示；否則為 null。</param>
+/// <param name="BottomRatio">下格若為有界指標，對應 0–1 的進度比例；否則為 null。</param>
+internal readonly record struct BarColumn(
+    BarCell Top,
+    BarCell Bottom,
+    string ValueTemplate,
+    double? TopRatio = null,
+    double? BottomRatio = null);
 
 /// <summary>使用者選擇要顯示哪些項目。</summary>
 internal readonly record struct VisibleItems(
@@ -57,15 +64,17 @@ internal static class BarContent
             columns.Add(new BarColumn(
                 new BarCell("電量", Percent(m.Battery.Percent), level),
                 PowerCell(m.Battery, m.BatteryDetail, level),
-                PercentTemplate));
+                PercentTemplate,
+                TopRatio: PercentRatio(m.Battery.Percent)));
         }
 
         if (visible.BatteryDetail && m.Battery.HasBattery && m.BatteryDetail is BatteryDetail detail)
         {
             columns.Add(new BarColumn(
-                new BarCell("功耗", Watts(detail.PowerWatts), detail.PowerWatts is null ? Level.Neutral : Level.Good),
+                new BarCell("功耗", Watts(detail.PowerWatts), Informational(detail.PowerWatts)),
                 new BarCell("健康", Percent(detail.HealthPercent), Thresholds.ForBatteryHealth(detail.HealthPercent)),
-                WattsTemplate));
+                WattsTemplate,
+                BottomRatio: PercentRatio(detail.HealthPercent)));
         }
 
         if (visible.CpuRam)
@@ -77,8 +86,9 @@ internal static class BarContent
         {
             columns.Add(new BarColumn(
                 new BarCell("GPU", Percent(m.GpuPercent), Thresholds.ForGpu(m.GpuPercent)),
-                new BarCell("顯存", ByteRate.Format(m.GpuMemoryBytes), m.GpuMemoryBytes is null ? Level.Neutral : Level.Good),
-                RateTemplate));
+                new BarCell("顯存", ByteRate.Format(m.GpuMemoryBytes), Informational(m.GpuMemoryBytes)),
+                RateTemplate,
+                TopRatio: PercentRatio(m.GpuPercent)));
         }
 
         SensorValues? sensors = m.Sensors;
@@ -88,7 +98,9 @@ internal static class BarContent
             columns.Add(new BarColumn(
                 new BarCell("CPU溫", SensorFormat.Temperature(sensors!.CpuTemperature), Thresholds.ForCpuTemperature(sensors.CpuTemperature)),
                 new BarCell("GPU溫", SensorFormat.Temperature(sensors.GpuTemperature), Thresholds.ForGpuTemperature(sensors.GpuTemperature)),
-                TemperatureTemplate));
+                TemperatureTemplate,
+                TopRatio: TemperatureRatio(sensors.CpuTemperature),
+                BottomRatio: TemperatureRatio(sensors.GpuTemperature)));
         }
 
         if (visible.Clock && (m.CpuClockMHz is not null || sensors?.GpuClockMHz is not null))
@@ -111,9 +123,9 @@ internal static class BarContent
         {
             FanReading first = sensors.Fans[0];
             BarCell second = sensors.Fans.Count > 1
-                ? new BarCell(sensors.Fans[1].Label, SensorFormat.Fan(sensors.Fans[1].Rpm), Level.Good)
+                ? new BarCell(sensors.Fans[1].Label, SensorFormat.Fan(sensors.Fans[1].Rpm), Level.Info)
                 : new BarCell(string.Empty, string.Empty, Level.Neutral);
-            columns.Add(new BarColumn(new BarCell(first.Label, SensorFormat.Fan(first.Rpm), Level.Good), second, FanTemplate));
+            columns.Add(new BarColumn(new BarCell(first.Label, SensorFormat.Fan(first.Rpm), Level.Info), second, FanTemplate));
         }
 
         if (visible.Disk)
@@ -142,13 +154,22 @@ internal static class BarContent
         return columns;
     }
 
-    /// <summary>頻率、功耗這類數值不是警示，有數值就顯示成綠色、沒有就是灰色。</summary>
-    private static Level Informational(double? value) => value is null ? Level.Neutral : Level.Good;
+    /// <summary>頻率、功耗、顯存、風扇這類純資訊讀數不是警示，有數值顯示為資訊色（鋼青藍）、沒有則是灰色。</summary>
+    private static Level Informational(double? value) => value is null ? Level.Neutral : Level.Info;
+
+    private static double? PercentRatio(double? percent) =>
+        percent is double value && double.IsFinite(value) ? Math.Clamp(value / 100.0, 0.0, 1.0) : null;
+
+    /// <summary>溫度以 30°C–100°C 對應到 0–1 的進度條範圍。</summary>
+    private static double? TemperatureRatio(double? celsius) =>
+        celsius is double value && double.IsFinite(value) ? Math.Clamp((value - 30.0) / 70.0, 0.0, 1.0) : null;
 
     private static BarColumn CpuRamColumn(MetricsSnapshot m) => new(
         new BarCell("CPU", Percent(m.CpuPercent), Thresholds.ForCpu(m.CpuPercent)),
         new BarCell("RAM", Percent(m.RamPercent), Thresholds.ForRam(m.RamPercent)),
-        PercentTemplate);
+        PercentTemplate,
+        TopRatio: PercentRatio(m.CpuPercent),
+        BottomRatio: PercentRatio(m.RamPercent));
 
     /// <summary>系統匣圖示的提示文字，例如「電量 82% · CPU 12% · RAM 61% · ↑1.1KB ↓8.6KB」。</summary>
     public static string TrayText(MetricsSnapshot m)

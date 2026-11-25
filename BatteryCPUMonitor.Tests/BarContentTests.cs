@@ -148,7 +148,7 @@ public class BarContentTests
         Assert.Equal(4, columns.Count);
         Assert.Equal("CPU", columns[0].Top.Label);
         Assert.Equal(new BarCell("GPU", "35%", Level.Good), columns[1].Top);
-        Assert.Equal(new BarCell("顯存", "3.2GB", Level.Good), columns[1].Bottom);
+        Assert.Equal(new BarCell("顯存", "3.2GB", Level.Info), columns[1].Bottom);
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public class BarContentTests
         var columns = BarContent.Build(snapshot, VisibleItems.All);
 
         Assert.Equal(new BarCell("GPU", "90%", Level.Critical), columns[1].Top);
-        Assert.Equal(new BarCell("顯存", "512MB", Level.Good), columns[1].Bottom);
+        Assert.Equal(new BarCell("顯存", "512MB", Level.Info), columns[1].Bottom);
     }
 
     [Fact]
@@ -189,7 +189,7 @@ public class BarContentTests
 
         Assert.Equal(5, columns.Count);
         Assert.Equal("電量", columns[0].Top.Label);
-        Assert.Equal(new BarCell("功耗", "-12.3W", Level.Good), columns[1].Top);
+        Assert.Equal(new BarCell("功耗", "-12.3W", Level.Info), columns[1].Top);
         Assert.Equal(new BarCell("健康", "91%", Level.Good), columns[1].Bottom);
         Assert.Equal("CPU", columns[2].Top.Label);
     }
@@ -222,7 +222,7 @@ public class BarContentTests
         var columns = BarContent.Build(snapshot, VisibleItems.All);
 
         Assert.Equal(new BarCell("充滿", "0:45", Level.Good), columns[0].Bottom);
-        Assert.Equal(new BarCell("功耗", "+45.0W", Level.Good), columns[1].Top);
+        Assert.Equal(new BarCell("功耗", "+45.0W", Level.Info), columns[1].Top);
     }
 
     [Theory]
@@ -310,9 +310,9 @@ public class BarContentTests
         BarColumn alone = Assert.Single(BarContent.Build(withoutSensors, OnlySensors));
         BarColumn both = Assert.Single(BarContent.Build(withSensors, OnlySensors));
 
-        Assert.Equal(new BarCell("CPU頻", "3.4GHz", Level.Good), alone.Top);
+        Assert.Equal(new BarCell("CPU頻", "3.4GHz", Level.Info), alone.Top);
         Assert.Equal(new BarCell("GPU頻", "--", Level.Neutral), alone.Bottom);
-        Assert.Equal(new BarCell("GPU頻", "1.9GHz", Level.Good), both.Bottom);
+        Assert.Equal(new BarCell("GPU頻", "1.9GHz", Level.Info), both.Bottom);
     }
 
     [Fact]
@@ -322,8 +322,8 @@ public class BarContentTests
 
         BarColumn column = Assert.Single(BarContent.Build(snapshot, OnlySensors));
 
-        Assert.Equal(new BarCell("CPU功耗", "45.2W", Level.Good), column.Top);
-        Assert.Equal(new BarCell("GPU功耗", "120W", Level.Good), column.Bottom);
+        Assert.Equal(new BarCell("CPU功耗", "45.2W", Level.Info), column.Top);
+        Assert.Equal(new BarCell("GPU功耗", "120W", Level.Info), column.Bottom);
     }
 
     [Fact]
@@ -333,8 +333,8 @@ public class BarContentTests
 
         BarColumn column = Assert.Single(BarContent.Build(snapshot, OnlySensors));
 
-        Assert.Equal(new BarCell("CPU風扇", "1204rpm", Level.Good), column.Top);
-        Assert.Equal(new BarCell("風扇2", "880rpm", Level.Good), column.Bottom);
+        Assert.Equal(new BarCell("CPU風扇", "1204rpm", Level.Info), column.Top);
+        Assert.Equal(new BarCell("風扇2", "880rpm", Level.Info), column.Bottom);
     }
 
     [Fact]

@@ -232,4 +232,40 @@ public class AppSettingsTests : IDisposable
 
         Assert.Null(AppSettings.Load(SettingsPath).Anchor);
     }
+
+    [Fact]
+    public void 外觀風格與深淺主題預設為曜石儀表與暖曜黑()
+    {
+        AppSettings settings = AppSettings.Load(SettingsPath);
+
+        Assert.Equal(BarVisualStyle.Obsidian, settings.VisualStyle);
+        Assert.Equal(ThemeMode.Dark, settings.Theme);
+    }
+
+    [Fact]
+    public void 外觀風格與深淺主題_存檔後再讀取仍保留()
+    {
+        new AppSettings { VisualStyle = BarVisualStyle.HudMatrix, Theme = ThemeMode.Light }.Save(SettingsPath);
+
+        AppSettings loaded = AppSettings.Load(SettingsPath);
+        string json = File.ReadAllText(SettingsPath);
+
+        Assert.Equal(BarVisualStyle.HudMatrix, loaded.VisualStyle);
+        Assert.Equal(ThemeMode.Light, loaded.Theme);
+        Assert.Contains("\"visualStyle\": \"hud\"", json);
+        Assert.Contains("\"themeMode\": \"light\"", json);
+    }
+
+    [Fact]
+    public void 外觀設定的值寫壞了_只退回預設值_不影響其他設定()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+        File.WriteAllText(SettingsPath, "{ \"anchorX\": 100, \"anchorY\": 200, \"visualStyle\": \"???\", \"themeMode\": \"???\" }");
+
+        AppSettings loaded = AppSettings.Load(SettingsPath);
+
+        Assert.Equal(BarVisualStyle.Obsidian, loaded.VisualStyle);
+        Assert.Equal(ThemeMode.Dark, loaded.Theme);
+        Assert.Equal(new Point(100, 200), loaded.Anchor);
+    }
 }

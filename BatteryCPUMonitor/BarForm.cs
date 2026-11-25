@@ -17,11 +17,10 @@ internal sealed class BarForm : Form
     private const int WS_EX_TRANSPARENT = 0x00000020;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
 
-    private const float FontPoints = 9f;
+    private const float FontPoints = 9.25f;
     private const int FirstRefreshMs = 300;
     private const int RefreshMs = 1000;
     private const int MaxTrayTextLength = 63;
-    private const int CornerRadiusAt96Dpi = 7;
     private const int TaskbarRetryMs = 5000;
 
     // 啟動後稍等一下再檢查更新，不要跟開機時一堆程式搶資源；之後每 12 小時檢查一次。
@@ -33,21 +32,9 @@ internal sealed class BarForm : Form
     private const int SensorPromptDelayMs = 9000;
 
     // 兩者都小於 1，視窗才會一直維持「分層視窗」樣式；滑鼠穿透需要它，切換時也不會閃爍。
-    private const double RestingOpacity = 0.8;
+    private const double RestingOpacity = 0.88;
     private const double HoverOpacity = 0.99;
 
-    private const TextFormatFlags TextFlags =
-        TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
-
-    private static readonly Size Unbounded = new(int.MaxValue, int.MaxValue);
-    private static readonly Color PanelColor = Color.FromArgb(28, 28, 30);
-    private static readonly Color LabelColor = Color.FromArgb(235, 235, 235);
-    private static readonly Color NeutralColor = Color.FromArgb(170, 170, 170);
-    private static readonly Color GoodColor = Color.FromArgb(50, 215, 75);
-    private static readonly Color WarnColor = Color.FromArgb(255, 214, 10);
-    private static readonly Color CriticalColor = Color.FromArgb(255, 69, 58);
-
-    // 以欄位初始設定式載入：基底類別建構時就會讀 CreateParams，那時設定必須已經就緒。
     private readonly string _settingsPath = AppSettings.DefaultPath;
     private readonly AppSettings _settings = AppSettings.Load(AppSettings.DefaultPath);
 
@@ -68,6 +55,13 @@ internal sealed class BarForm : Form
     private readonly ToolStripMenuItem _showGpuItem = new("GPU 與顯示記憶體");
     private readonly ToolStripMenuItem _showDiskItem = new("磁碟讀寫");
     private readonly ToolStripMenuItem _showNetworkItem = new("網路速度");
+    private readonly ToolStripMenuItem _appearanceMenu = new("外觀風格");
+    private readonly ToolStripMenuItem _styleObsidianItem = new("曜石儀表（微進度條＋狀態導軌）");
+    private readonly ToolStripMenuItem _styleHudItem = new("航電矩陣（校準框線＋LED＋即時波形）");
+    private readonly ToolStripMenuItem _styleEditorialItem = new("極簡雙色（星芒標記＋極致省空間）");
+    private readonly ToolStripMenuItem _themeDarkItem = new("暖曜黑（深色）");
+    private readonly ToolStripMenuItem _themeLightItem = new("暖象牙白（淺色）");
+    private readonly ToolStripMenuItem _themeSystemItem = new("跟隨 Windows 主題");
     private readonly ToolStripMenuItem _cpuModeMenu = new("CPU 使用率算法");
     private readonly ToolStripMenuItem _cpuTimeItem = new("依忙碌時間（與新版工作管理員一致）")
     {
@@ -104,11 +98,16 @@ internal sealed class BarForm : Form
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly System.Windows.Forms.Timer _updateTimer = new();
 
-    private Font _font;
+    private ThemeFontSet _fonts;
     private int _fontDpi;
+    private ThemePalette _palette = BarTheme.Dark;
+    private bool _dwmRounded;
 
     private MetricsSnapshot _snapshot = MetricsSnapshot.Empty;
-    private GridResult _layout = new(Size.Empty, []);
+    private StyledGridResult _layout = new(Size.Empty, Rectangle.Empty, [], []);
+    private Level _overallLevel = Level.Neutral;
+    private readonly MetricHistory _cpuHistory = new(14);
+    private bool _pulseBright = true;
     private bool _sampling;
 
     private UpdateController? _updater;
@@ -138,13 +137,14 @@ internal sealed class BarForm : Form
     {
         _collector = new MetricsCollector(() => _sensors.Latest) { CpuMode = _settings.CpuMode };
 
+        _palette = ResolvePalette();
         Text = "BatteryCPUMonitor";
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         ShowInTaskbar = false;
         TopMost = true;
-        BackColor = PanelColor;
+        BackColor = _palette.PanelSolid;
         Opacity = RestingOpacity;
         Icon = _icon;
         SetStyle(
@@ -156,10 +156,12 @@ internal sealed class BarForm : Form
 
         _userAnchor = _settings.Anchor;
         _fontDpi = DeviceDpi;
-        _font = CreateFont(_fontDpi);
+        _fonts = ThemeFontSet.Create(FontPoints, _fontDpi);
 
         BuildMenu();
+        ApplyMenuTheme();
         ContextMenuStrip = _menu;
+        SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
 
         _tray.Icon = _icon;
         _tray.Text = "BatteryCPUMonitor";
@@ -224,6 +226,7 @@ internal sealed class BarForm : Form
     {
         if (disposing)
         {
+            SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
             _timer.Dispose();
             _updateTimer.Dispose();
             _sensorPromptTimer.Dispose();
@@ -234,7 +237,7 @@ internal sealed class BarForm : Form
             _tray.Visible = false;
             _tray.Dispose();
             _menu.Dispose();
-            _font.Dispose();
+            _fonts.Dispose();
             _icon.Dispose();
         }
 
@@ -260,6 +263,21 @@ internal sealed class BarForm : Form
         showItems.DropDownItems.Add(_showClockItem);
         showItems.DropDownItems.Add(_showPowerItem);
         showItems.DropDownItems.Add(_showFansItem);
+
+        _appearanceMenu.DropDownItems.Add(_styleObsidianItem);
+        _appearanceMenu.DropDownItems.Add(_styleHudItem);
+        _appearanceMenu.DropDownItems.Add(_styleEditorialItem);
+        _appearanceMenu.DropDownItems.Add(new ToolStripSeparator());
+        _appearanceMenu.DropDownItems.Add(_themeDarkItem);
+        _appearanceMenu.DropDownItems.Add(_themeLightItem);
+        _appearanceMenu.DropDownItems.Add(_themeSystemItem);
+
+        _styleObsidianItem.Click += (_, _) => SetVisualStyle(BarVisualStyle.Obsidian);
+        _styleHudItem.Click += (_, _) => SetVisualStyle(BarVisualStyle.HudMatrix);
+        _styleEditorialItem.Click += (_, _) => SetVisualStyle(BarVisualStyle.Editorial);
+        _themeDarkItem.Click += (_, _) => SetThemeMode(ThemeMode.Dark);
+        _themeLightItem.Click += (_, _) => SetThemeMode(ThemeMode.Light);
+        _themeSystemItem.Click += (_, _) => SetThemeMode(ThemeMode.System);
 
         _cpuModeMenu.DropDownItems.Add(_cpuTimeItem);
         _cpuModeMenu.DropDownItems.Add(_cpuUtilityItem);
@@ -342,6 +360,12 @@ internal sealed class BarForm : Form
             _showClockItem.Checked = _settings.ShowClock;
             _showPowerItem.Checked = _settings.ShowPower;
             _showFansItem.Checked = _settings.ShowFans;
+            _styleObsidianItem.Checked = _settings.VisualStyle == BarVisualStyle.Obsidian;
+            _styleHudItem.Checked = _settings.VisualStyle == BarVisualStyle.HudMatrix;
+            _styleEditorialItem.Checked = _settings.VisualStyle == BarVisualStyle.Editorial;
+            _themeDarkItem.Checked = _settings.Theme == ThemeMode.Dark;
+            _themeLightItem.Checked = _settings.Theme == ThemeMode.Light;
+            _themeSystemItem.Checked = _settings.Theme == ThemeMode.System;
             _cpuTimeItem.Checked = _settings.CpuMode == CpuUsageMode.Time;
             _cpuUtilityItem.Checked = _settings.CpuMode == CpuUsageMode.Utility;
             _sensorsEnabledItem.Checked = _settings.SensorsEnabled;
@@ -361,12 +385,15 @@ internal sealed class BarForm : Form
             _autoUpdateItem.Checked = _settings.AutoUpdate;
             _askBeforeUpdateItem.Enabled = canUpdate && _settings.AutoUpdate;
             _askBeforeUpdateItem.Checked = !_settings.UpdateWithoutAsking;
+
+            ApplyMenuTheme();
         };
 
         _menu.Items.Add(new ToolStripMenuItem($"BatteryCPUMonitor v{Application.ProductVersion}") { Enabled = false });
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_showBarItem);
         _menu.Items.Add(showItems);
+        _menu.Items.Add(_appearanceMenu);
         _menu.Items.Add(_cpuModeMenu);
         _menu.Items.Add(_taskbarModeItem);
         _menu.Items.Add(_sensorsMenu);
@@ -380,6 +407,63 @@ internal sealed class BarForm : Form
         _menu.Items.Add(_askBeforeUpdateItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(close);
+    }
+
+    private void SetVisualStyle(BarVisualStyle style)
+    {
+        if (_settings.VisualStyle == style)
+        {
+            return;
+        }
+
+        _settings.VisualStyle = style;
+        _settings.Save(_settingsPath);
+        UpdateChrome();
+        ApplyLayout();
+    }
+
+    private void SetThemeMode(ThemeMode mode)
+    {
+        if (_settings.Theme == mode)
+        {
+            return;
+        }
+
+        _settings.Theme = mode;
+        _settings.Save(_settingsPath);
+        ApplyTheme();
+    }
+
+    private ThemePalette ResolvePalette() =>
+        BarTheme.ForFloating(ThemeModes.ResolveLight(_settings.Theme, WindowChrome.IsSystemAppsLight()));
+
+    private void ApplyTheme()
+    {
+        _palette = ResolvePalette();
+        BackColor = _palette.PanelSolid;
+        ApplyMenuTheme();
+        _diagnosticsForm?.ApplyTheme(_palette);
+        UpdateChrome();
+        Invalidate();
+    }
+
+    private void ApplyMenuTheme() => ThemedMenuRenderer.Apply(_menu, _palette);
+
+    private void OnSystemPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    {
+        if (_settings.Theme != ThemeMode.System || IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        try
+        {
+            BeginInvoke(ApplyTheme);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            // 程式正在關閉。
+        }
     }
 
     private void SetCpuMode(CpuUsageMode mode)
@@ -700,7 +784,7 @@ internal sealed class BarForm : Form
             return;
         }
 
-        _diagnosticsForm = new SensorDiagnosticsForm(BuildSensorDiagnostics, _icon);
+        _diagnosticsForm = new SensorDiagnosticsForm(BuildSensorDiagnostics, _icon, _palette);
         _diagnosticsForm.FormClosed += (_, _) => _diagnosticsForm = null;
         _diagnosticsForm.Show();
     }
@@ -886,6 +970,8 @@ internal sealed class BarForm : Form
 
             _timer.Interval = RefreshMs;
             _snapshot = snapshot;
+            _cpuHistory.Add(snapshot.CpuPercent);
+            _pulseBright = !_pulseBright;
 
             string trayText = BarContent.TrayText(snapshot);
             _tray.Text = trayText.Length <= MaxTrayTextLength ? trayText : trayText[..MaxTrayTextLength];
@@ -906,17 +992,24 @@ internal sealed class BarForm : Form
     {
         base.OnPaint(e);
 
-        foreach (TextRun run in _layout.Runs)
-        {
-            Color color = run.Level is Level level ? ColorFor(level) : LabelColor;
-            TextRenderer.DrawText(e.Graphics, run.Text, _font, new Point(run.X, run.Y), color, BackColor, TextFlags);
-        }
+        BarRenderer.PaintFloating(
+            e.Graphics,
+            ClientSize,
+            _layout,
+            _fonts,
+            _palette,
+            _settings.VisualStyle,
+            _overallLevel,
+            _cpuHistory.Snapshot(),
+            _pulseBright,
+            drawOuterBorder: !_dwmRounded,
+            cornerRadius: BarRenderer.CornerRadiusFor(_settings.VisualStyle, _fontDpi));
     }
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        UpdateRoundedCorners();
+        UpdateChrome();
     }
 
     protected override void OnSizeChanged(EventArgs e)
@@ -925,20 +1018,20 @@ internal sealed class BarForm : Form
         UpdateRoundedCorners();
     }
 
-    private int MeasureWidth(string text) => TextRenderer.MeasureText(text, _font, Unbounded, TextFlags).Width;
-
     /// <summary>
     /// 依目前的數值與設定更新畫面：嵌入工作列時交給工作列上的小工具，否則重新排版浮動橫條。
     /// </summary>
     private void ApplyLayout()
     {
         IReadOnlyList<BarColumn> columns = BarContent.Build(_snapshot, _settings.Visible);
+        _overallLevel = BarTheme.OverallLevel(columns);
+        double[] history = _cpuHistory.Snapshot();
 
         // 隱藏時連工作列上的小工具也撤掉；再顯示時會重新嵌入。
         bool useTaskbar = !_settings.BarHidden && _settings.TaskbarMode && EnsureTaskbar();
         if (useTaskbar)
         {
-            _taskbar!.UpdateContent(columns, _settings.ClickThrough);
+            _taskbar!.UpdateContent(columns, _settings.ClickThrough, _settings.VisualStyle, history, _pulseBright);
         }
         else
         {
@@ -959,8 +1052,21 @@ internal sealed class BarForm : Form
             return;
         }
 
-        int rowHeight = TextRenderer.MeasureText("電0", _font, Unbounded, TextFlags).Height;
-        _layout = GridLayout.Compute(columns, MeasureWidth, rowHeight, GridSpacing.ForDpi(_fontDpi));
+        using Graphics measureGraphics = CreateGraphics();
+        int labelHeight = BarRenderer.MeasureFloatingText(measureGraphics, "電A", _fonts.Label).Height;
+        int valueHeight = BarRenderer.MeasureFloatingText(measureGraphics, "00", _fonts.Value).Height;
+        int unitHeight = BarRenderer.MeasureFloatingText(measureGraphics, "%W", _fonts.Unit).Height;
+
+        StyledGridMetrics metrics = StyledGridMetrics.For(_settings.VisualStyle, _fontDpi, taskbar: false);
+        _layout = GridLayout.ComputeStyled(
+            columns,
+            s => BarRenderer.MeasureFloatingText(measureGraphics, s, _fonts.Label).Width,
+            s => BarRenderer.MeasureFloatingText(measureGraphics, s, _fonts.Value).Width,
+            s => BarRenderer.MeasureFloatingText(measureGraphics, s, _fonts.Unit).Width,
+            labelHeight,
+            valueHeight,
+            unitHeight,
+            metrics);
 
         Point anchor;
         Rectangle workingArea;
@@ -985,15 +1091,36 @@ internal sealed class BarForm : Form
         Invalidate();
     }
 
-    private void UpdateRoundedCorners()
+    private void UpdateChrome()
     {
-        // 基底類別建構期間也會觸發 SizeChanged，那時視窗還沒建立，先不處理。
-        if (!IsHandleCreated || Width <= 0 || Height <= 0)
+        if (!IsHandleCreated)
         {
             return;
         }
 
-        int diameter = Math.Min(Math.Min(Width, Height), 2 * (int)Math.Round(CornerRadiusAt96Dpi * _fontDpi / 96.0));
+        _dwmRounded = WindowChrome.TryApplyFloatingChrome(Handle, _settings.VisualStyle, _palette.Border);
+        if (_dwmRounded)
+        {
+            Region? old = Region;
+            Region = null;
+            old?.Dispose();
+        }
+        else
+        {
+            UpdateRoundedCorners();
+        }
+    }
+
+    private void UpdateRoundedCorners()
+    {
+        // Windows 11 已由 DWM 原生繪製抗鋸齒圓角與細框，不必用 Region 硬切造成鋸齒。
+        if (_dwmRounded || !IsHandleCreated || Width <= 0 || Height <= 0)
+        {
+            return;
+        }
+
+        int radius = BarRenderer.CornerRadiusFor(_settings.VisualStyle, _fontDpi);
+        int diameter = Math.Min(Math.Min(Width, Height), 2 * radius);
         if (diameter < 2)
         {
             return;
@@ -1011,19 +1138,7 @@ internal sealed class BarForm : Form
         old?.Dispose();
     }
 
-    private static Color ColorFor(Level level) => level switch
-    {
-        Level.Good => GoodColor,
-        Level.Warn => WarnColor,
-        Level.Critical => CriticalColor,
-        _ => NeutralColor,
-    };
-
     // ---- 高 DPI ----
-
-    /// <summary>字體以像素為單位建立，大小依橫條所在螢幕的 DPI 換算。</summary>
-    private static Font CreateFont(int dpi) =>
-        new(FontFamily.GenericSansSerif, FontPoints * dpi / 72f, FontStyle.Bold, GraphicsUnit.Pixel);
 
     /// <summary>橫條被移到不同縮放比例的螢幕時，依新的 DPI 重建字體並重新排版。</summary>
     protected override void OnDpiChanged(DpiChangedEventArgs e)
@@ -1033,12 +1148,13 @@ internal sealed class BarForm : Form
 
         if (e.DeviceDpiNew != _fontDpi)
         {
-            Font old = _font;
+            ThemeFontSet old = _fonts;
             _fontDpi = e.DeviceDpiNew;
-            _font = CreateFont(_fontDpi);
+            _fonts = ThemeFontSet.Create(FontPoints, _fontDpi);
             old.Dispose();
         }
 
+        UpdateChrome();
         ApplyLayout();
     }
 
