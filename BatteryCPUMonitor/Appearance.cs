@@ -80,7 +80,20 @@ internal static class ThemeModes
         ThemeMode.System => systemLight,
         _ => false,
     };
+
+    /// <summary>
+    /// 解析工作列小工具的主題狀態：若使用者手動指定與 Windows 工作列相反的深淺色，
+    /// 啟用實心儀表膠囊底框（UseCapsule）以兼顧對比可讀性與主題切換效果。
+    /// </summary>
+    public static TaskbarThemeState ResolveTaskbar(ThemeMode mode, bool taskbarLight)
+    {
+        bool contentLight = ResolveLight(mode, taskbarLight);
+        return new TaskbarThemeState(contentLight, taskbarLight, UseCapsule: contentLight != taskbarLight);
+    }
 }
+
+/// <summary>工作列小工具的主題解析結果。</summary>
+internal readonly record struct TaskbarThemeState(bool ContentLight, bool TaskbarLight, bool UseCapsule);
 
 /// <summary>
 /// 整套介面共用的色票（浮動橫條、右鍵選單、診斷視窗與工作列小工具）。

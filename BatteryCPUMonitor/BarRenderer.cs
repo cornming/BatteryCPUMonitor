@@ -124,6 +124,98 @@ internal static class BarRenderer
         DrawCells(g, layout.Cells, offsetY, fonts, palette, style, textBackColor: colorKey, isTaskbar: true);
     }
 
+    /// <summary>
+    /// 在工作列中以實心儀表膠囊繪製（當使用者選擇與 Windows 工作列相反的深淺主題時使用）：
+    /// 膠囊外部維持透明色鍵，膠囊外輪廓採像素對齊零毛邊繪製，內部則享有與浮動橫條一致的漸層與 GDI+ ClearType 質感。
+    /// </summary>
+    public static void PaintTaskbarCapsule(
+        Graphics g,
+        Size clientSize,
+        StyledGridResult layout,
+        ThemeFontSet fonts,
+        ThemePalette palette,
+        BarVisualStyle style,
+        Level overallLevel,
+        IReadOnlyList<double> cpuHistory,
+        bool pulseBright,
+        Color colorKey)
+    {
+        if (clientSize.Width <= 2 || clientSize.Height <= 2)
+        {
+            return;
+        }
+
+        int dpi = fonts.Dpi;
+        int minOuterMarginY = Math.Max(1, Scale(2, dpi));
+        int preferredMarginY = Math.Max(2, Scale(3, dpi));
+        int neededHeight = layout.Size.Height + Scale(4, dpi);
+        int maxCapsuleH = Math.Max(1, clientSize.Height - minOuterMarginY * 2);
+        int capsuleH = Math.Min(maxCapsuleH, Math.Max(neededHeight, clientSize.Height - preferredMarginY * 2));
+        int capsuleY = Math.Max(0, (clientSize.Height - capsuleH) / 2);
+        var capsule = new Rectangle(0, capsuleY, clientSize.Width, capsuleH);
+
+        // 1. 像素對齊膠囊底框（避免外緣抗鋸齒與 colorKey 混色產生雜邊）
+        using (var bgBrush = new LinearGradientBrush(capsule, palette.PanelTop, palette.PanelBottom, LinearGradientMode.Vertical))
+        {
+            g.FillRectangle(bgBrush, capsule);
+        }
+
+        // 2. 航電矩陣微格線
+        if (style == BarVisualStyle.HudMatrix)
+        {
+            GraphicsState state = g.Save();
+            g.SetClip(capsule);
+            DrawMicroGrid(g, new Size(capsule.Right, capsule.Bottom), palette.GridLine, Scale(12, dpi));
+            g.Restore(state);
+        }
+
+        // 3. 頂部微高光
+        using (var specularPen = new Pen(palette.TopSpecular, 1f))
+        {
+            g.DrawLine(specularPen, capsule.Left + 2, capsule.Top + 1, Math.Max(capsule.Left + 2, capsule.Right - 3), capsule.Top + 1);
+        }
+
+        // 4. 像素對齊外框；非航電風格在四角切去 1px 還原為 colorKey，呈現俐落微圓角且完全無毛邊
+        using (var borderPen = new Pen(palette.Border, 1f))
+        {
+            g.DrawRectangle(borderPen, capsule.X, capsule.Y, capsule.Width - 1, capsule.Height - 1);
+        }
+
+        if (style != BarVisualStyle.HudMatrix && capsule.Width > 4 && capsule.Height > 4)
+        {
+            using var keyBrush = new SolidBrush(colorKey);
+            using var cornerBrush = new SolidBrush(palette.Border);
+            int l = capsule.Left;
+            int r = capsule.Right - 1;
+            int t = capsule.Top;
+            int b = capsule.Bottom - 1;
+
+            g.FillRectangle(keyBrush, l, t, 1, 1);
+            g.FillRectangle(keyBrush, r, t, 1, 1);
+            g.FillRectangle(keyBrush, l, b, 1, 1);
+            g.FillRectangle(keyBrush, r, b, 1, 1);
+
+            g.FillRectangle(cornerBrush, l + 1, t + 1, 1, 1);
+            g.FillRectangle(cornerBrush, r - 1, t + 1, 1, 1);
+            g.FillRectangle(cornerBrush, l + 1, b - 1, 1, 1);
+            g.FillRectangle(cornerBrush, r - 1, b - 1, 1, 1);
+        }
+        else if (style == BarVisualStyle.HudMatrix)
+        {
+            GraphicsState state = g.Save();
+            g.TranslateTransform(capsule.X, capsule.Y);
+            DrawCornerBrackets(g, capsule.Size, palette.ForStatusBeacon(overallLevel), dpi);
+            g.Restore(state);
+        }
+
+        // 5. 膠囊內部全部是不透明暖曜黑／暖象牙白底，可直接用高品質抗鋸齒與 ClearType 繪製
+        int contentOffsetY = capsule.Y + Math.Max(0, (capsule.Height - layout.Size.Height) / 2);
+        Color beaconColor = palette.ForStatusBeacon(overallLevel);
+        DrawHeader(g, layout.HeaderRect, contentOffsetY, fonts, palette, style, beaconColor, cpuHistory, pulseBright, isTaskbar: false);
+        DrawDividers(g, layout.DividerXs, contentOffsetY, layout.Size.Height, palette.Divider, style, isTaskbar: false);
+        DrawCells(g, layout.Cells, contentOffsetY, fonts, palette, style, textBackColor: palette.PanelSolid, isTaskbar: false);
+    }
+
     public static int CornerRadiusFor(BarVisualStyle style, int dpi) => style switch
     {
         BarVisualStyle.HudMatrix => Scale(4, dpi),

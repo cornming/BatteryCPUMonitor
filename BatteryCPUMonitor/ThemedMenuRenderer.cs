@@ -22,13 +22,14 @@ internal sealed class ThemedMenuRenderer : ToolStripProfessionalRenderer
     /// <summary>套用本渲染器與一致的字色、底色到整個選單與所有子選單。</summary>
     public static void Apply(ContextMenuStrip menu, ThemePalette palette)
     {
-        menu.Renderer = new ThemedMenuRenderer(palette);
+        var renderer = new ThemedMenuRenderer(palette);
+        menu.Renderer = renderer;
         menu.BackColor = palette.MenuBackground;
         menu.ForeColor = palette.MenuText;
-        ApplyItems(menu.Items, palette);
+        ApplyItems(menu.Items, palette, renderer);
     }
 
-    public static void ApplyItems(ToolStripItemCollection items, ThemePalette palette)
+    public static void ApplyItems(ToolStripItemCollection items, ThemePalette palette, ToolStripRenderer? renderer = null)
     {
         foreach (ToolStripItem item in items)
         {
@@ -37,9 +38,14 @@ internal sealed class ThemedMenuRenderer : ToolStripProfessionalRenderer
 
             if (item is ToolStripMenuItem menuItem)
             {
+                if (renderer is not null)
+                {
+                    menuItem.DropDown.Renderer = renderer;
+                }
+
                 menuItem.DropDown.BackColor = palette.MenuBackground;
                 menuItem.DropDown.ForeColor = palette.MenuText;
-                ApplyItems(menuItem.DropDownItems, palette);
+                ApplyItems(menuItem.DropDownItems, palette, renderer);
             }
         }
     }

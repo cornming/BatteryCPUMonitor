@@ -444,14 +444,14 @@ internal sealed class BarForm : Form
         ApplyMenuTheme();
         _diagnosticsForm?.ApplyTheme(_palette);
         UpdateChrome();
-        Invalidate();
+        ApplyLayout();
     }
 
     private void ApplyMenuTheme() => ThemedMenuRenderer.Apply(_menu, _palette);
 
     private void OnSystemPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
     {
-        if (_settings.Theme != ThemeMode.System || IsDisposed || !IsHandleCreated)
+        if ((_settings.Theme != ThemeMode.System && !_settings.TaskbarMode) || IsDisposed || !IsHandleCreated)
         {
             return;
         }
@@ -1031,7 +1031,7 @@ internal sealed class BarForm : Form
         bool useTaskbar = !_settings.BarHidden && _settings.TaskbarMode && EnsureTaskbar();
         if (useTaskbar)
         {
-            _taskbar!.UpdateContent(columns, _settings.ClickThrough, _settings.VisualStyle, history, _pulseBright);
+            _taskbar!.UpdateContent(columns, _settings.ClickThrough, _settings.VisualStyle, _settings.Theme, history, _pulseBright);
         }
         else
         {

@@ -277,6 +277,17 @@ internal readonly record struct StyledGridMetrics(
 
     /// <summary>工作列高度緊湊時，收斂微進度條以確保兩列文字永遠完整不裁切。</summary>
     public StyledGridMetrics WithoutMeters() => this with { MeterHeight = 0, MeterGap = 0 };
+
+    /// <summary>工作列以實心儀表膠囊呈現時，左右略增留白，避免貼齊膠囊細邊框。</summary>
+    public StyledGridMetrics WithCapsulePadding(int dpi)
+    {
+        int S(int px) => (int)Math.Round(px * dpi / 96.0, MidpointRounding.AwayFromZero);
+        return this with
+        {
+            PaddingLeft = Math.Max(PaddingLeft, S(8)),
+            PaddingRight = Math.Max(PaddingRight, S(10)),
+        };
+    }
 }
 
 internal readonly record struct StyledCellLayout(

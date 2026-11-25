@@ -45,6 +45,26 @@ public class AppearanceTests
     }
 
     [Theory]
+    [InlineData(ThemeMode.Dark, false, false, false)]   // 深色工作列 + 深色主題 -> 透明
+    [InlineData(ThemeMode.Dark, true, false, true)]     // 淺色工作列 + 深色主題 -> 啟用深色儀表膠囊
+    [InlineData(ThemeMode.Light, false, true, true)]    // 深色工作列 + 淺色主題 -> 啟用淺色儀表膠囊
+    [InlineData(ThemeMode.Light, true, true, false)]    // 淺色工作列 + 淺色主題 -> 透明
+    [InlineData(ThemeMode.System, false, false, false)] // 跟隨系統（深）-> 透明
+    [InlineData(ThemeMode.System, true, true, false)]   // 跟隨系統（淺）-> 透明
+    public void 工作列深淺主題解析_相反色系啟用實心膠囊_同色系維持透明(
+        ThemeMode mode,
+        bool taskbarLight,
+        bool expectedContentLight,
+        bool expectedCapsule)
+    {
+        TaskbarThemeState state = ThemeModes.ResolveTaskbar(mode, taskbarLight);
+
+        Assert.Equal(expectedContentLight, state.ContentLight);
+        Assert.Equal(taskbarLight, state.TaskbarLight);
+        Assert.Equal(expectedCapsule, state.UseCapsule);
+    }
+
+    [Theory]
     [InlineData("82%", "82", "%")]
     [InlineData("+45.0W", "+45.0", "W")]
     [InlineData("-12.3W", "-12.3", "W")]
@@ -273,6 +293,101 @@ public class AppearanceTests
             Directory.CreateDirectory(previewDir);
             string suffix = light ? "light" : "dark";
             bmp.Save(Path.Combine(previewDir, $"{style}-{suffix}.png"), System.Drawing.Imaging.ImageFormat.Png);
+        }
+    }
+
+    [Theory]
+    [InlineData(BarVisualStyle.Obsidian, false, true)]  // 淺色工作列上的深色曜石膠囊
+    [InlineData(BarVisualStyle.HudMatrix, false, true)] // 淺色工作列上的深色航電膠囊
+    [InlineData(BarVisualStyle.Editorial, false, true)] // 淺色工作列上的深色極簡膠囊
+    [InlineData(BarVisualStyle.Obsidian, true, false)]  // 深色工作列上的淺色曜石膠囊
+    public void 繪製工作列實心儀表膠囊_上下留白維持透明色鍵且內部畫出完整儀表(
+        BarVisualStyle style,
+        bool contentLight,
+        bool taskbarLight)
+    {
+        var snapshot = new MetricsSnapshot(
+            Battery: new BatterySnapshot(HasBattery: true, Percent: 82, IsPluggedIn: true, IsCharging: true, SecondsRemaining: null),
+            CpuPercent: 28,
+            RamPercent: 64,
+            DiskReadBytesPerSecond: 45.2 * 1024,
+            DiskWriteBytesPerSecond: 3.9 * 1024 * 1024,
+            Network: new NetworkRate(1.1 * 1024, 8.6 * 1024))
+        with
+        {
+            GpuPercent = 35,
+            GpuMemoryBytes = 3.2 * 1024 * 1024 * 1024,
+        };
+
+        var columns = BarContent.Build(snapshot, VisibleItems.Default);
+        using ThemeFontSet fonts = ThemeFontSet.Create(8.25f, 96);
+
+        StyledGridResult layout;
+        using (var probeBmp = new Bitmap(1, 1))
+        using (Graphics measureG = Graphics.FromImage(probeBmp))
+        {
+            int labelH = BarRenderer.MeasureFloatingText(measureG, "電A", fonts.Label).Height;
+            int valueH = BarRenderer.MeasureFloatingText(measureG, "00", fonts.Value).Height;
+            int unitH = BarRenderer.MeasureFloatingText(measureG, "%W", fonts.Unit).Height;
+
+            StyledGridMetrics metrics = StyledGridMetrics.For(style, 96, taskbar: true).WithCapsulePadding(96);
+            layout = GridLayout.ComputeStyled(
+                columns,
+                s => BarRenderer.MeasureFloatingText(measureG, s, fonts.Label).Width,
+                s => BarRenderer.MeasureFloatingText(measureG, s, fonts.Value).Width,
+                s => BarRenderer.MeasureFloatingText(measureG, s, fonts.Unit).Width,
+                labelH,
+                valueH,
+                unitH,
+                metrics);
+        }
+
+        Color colorKey = taskbarLight ? BarTheme.TaskbarLightKey : BarTheme.TaskbarDarkKey;
+        ThemePalette palette = BarTheme.ForFloating(contentLight);
+        var clientSize = new Size(layout.Size.Width, 48); // Windows 11 工作列標準高度
+
+        using var bmp = new Bitmap(clientSize.Width, clientSize.Height);
+        using (Graphics g = Graphics.FromImage(bmp))
+        {
+            g.Clear(colorKey);
+            BarRenderer.PaintTaskbarCapsule(
+                g,
+                clientSize,
+                layout,
+                fonts,
+                palette,
+                style,
+                BarTheme.OverallLevel(columns),
+                [14, 18, 26, 22, 31, 28],
+                pulseBright: true,
+                colorKey);
+        }
+
+        // 最上緣與最下緣必須維持色鍵透明，確保膠囊在工作列內留有上下呼吸空間。
+        Assert.Equal(colorKey.ToArgb(), bmp.GetPixel(clientSize.Width / 2, 0).ToArgb());
+        Assert.Equal(colorKey.ToArgb(), bmp.GetPixel(clientSize.Width / 2, clientSize.Height - 1).ToArgb());
+
+        // 中央區域應有明顯的膠囊底色與文字前景像素。
+        int nonKeyPixels = 0;
+        for (int y = 0; y < bmp.Height; y++)
+        {
+            for (int x = 0; x < bmp.Width; x++)
+            {
+                if (bmp.GetPixel(x, y).ToArgb() != colorKey.ToArgb())
+                {
+                    nonKeyPixels++;
+                }
+            }
+        }
+
+        Assert.True(nonKeyPixels > clientSize.Width * 30, $"膠囊像素過少：{nonKeyPixels}");
+
+        string? previewDir = Environment.GetEnvironmentVariable("RENDER_PREVIEW_DIR");
+        if (!string.IsNullOrEmpty(previewDir))
+        {
+            Directory.CreateDirectory(previewDir);
+            string tag = contentLight ? "light-on-darktb" : "dark-on-lighttb";
+            bmp.Save(Path.Combine(previewDir, $"taskbar-capsule-{style}-{tag}.png"), System.Drawing.Imaging.ImageFormat.Png);
         }
     }
 }
